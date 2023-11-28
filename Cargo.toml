@@ -1,0 +1,47 @@
+[package]
+name = "omalley-aoc2023"
+version = "0.0.1"
+authors = ["Owen O'Malley <omalley@apache.org>"]
+edition = "2023"
+license = "GPL"
+homepage = "https://github.com/omalley/advent_of_code_2023"
+repository = "https://github.com/omalley/advent_of_code_2023"
+keywords = ["aoc", "advent", "example"]
+description = "Owen's Solutions to AoC 2023"
+
+[dependencies]
+argh = "0.1"
+colored = "2"
+itertools = "0.10"
+paste = "1.0"
+priority-queue = "1.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+strum = "0.24"
+strum_macros = "0.24"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[profile.test]
+opt-level = 3
+
+[profile.release]
+panic = "abort"
+debug = true
+lto = "fat"
+
+# The profile to benchmark with (`cargo run --profile benchmark`)
+[profile.benchmark]
+inherits = "release"
+debug = false
+lto = "fat"
+
+[profile.bench]
+inherits = "release"
+debug = false
+lto = "fat"
+
+[[bench]]
+name = "bench"
+harness = false
