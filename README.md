@@ -3,7 +3,7 @@
 These are [Owen's](https://fosstodon.org/@omalley) Rust solutions for
 [Advent of Code 2023](https://adventofcode.com/2023/). I use a
 framework that I forked from
-[here](https://gitlab.com/mbryant/aoc-2021/), but now is noticably
+[here](https://gitlab.com/mbryant/aoc-2021/), but now is noticeably
 different. In 2021, I started using Advent of Code to learn Rust and I
 highly recommend that strategy. Learning new programming languages is
 hard with out using them to solve problems and Advent of Code provides
