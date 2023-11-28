@@ -2,7 +2,7 @@
 name = "omalley-aoc2023"
 version = "0.0.1"
 authors = ["Owen O'Malley <omalley@apache.org>"]
-edition = "2023"
+edition = "2021"
 license = "GPL"
 homepage = "https://github.com/omalley/advent_of_code_2023"
 repository = "https://github.com/omalley/advent_of_code_2023"
