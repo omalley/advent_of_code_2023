@@ -27,11 +27,12 @@ Each day is put into a file src/dayX.rs and input/dayX.txt. You need
 to update src/lib.rs to include it. Each day consists of three functions:
 
 * generate(input: &str) -> ParsedType
-* part1(input: &ParsedType) -> OutputType
-* part2(input: &ParsedType) -> OutputType
+* part1(input: &ParsedType) -> Display
+* part2(input: &ParsedType) -> Display
 
-The ParsedType and OutputType may be different for each day. The OutputType
-has to implement Display so that it can be converted to a string.
+The ParsedType may be different for each day. The output types must
+implement Display so that it can be converted to a string, but they do
+not need to be the same.
 
 The framework will store the previous answer for each day's part 1 and
 2 and will warn you if they change. That is really helpful when you
