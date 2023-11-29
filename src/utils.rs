@@ -91,12 +91,12 @@ macro_rules! day_list_internal {
         $(pub mod $day;)*
 
         /// Build a lambda to run each day's code
-        pub const FUNCS : &[&dyn Fn(&str) -> crate::utils::DayResult] = &[
+        pub const FUNCS : &[&dyn Fn(&str) -> $crate::utils::DayResult] = &[
             $(&|data| {
-                let (generate_time, input) = crate::utils::time(&|| $day::generator(data));
-                let part1 = crate::utils::time(&|| $day::part1(&input));
-                let part2 = crate::utils::time(&|| $day::part2(&input));
-                crate::utils::DayResult{day: stringify!($day).to_string(),
+                let (generate_time, input) = $crate::utils::time(&|| $day::generator(data));
+                let part1 = $crate::utils::time(&|| $day::part1(&input));
+                let part2 = $crate::utils::time(&|| $day::part2(&input));
+                $crate::utils::DayResult{day: stringify!($day).to_string(),
                           generate_time,
                           part1: (part1.0, part1.1.to_string()),
                           part2: (part2.0, part2.1.to_string())}},)*
@@ -110,7 +110,7 @@ macro_rules! day_list_internal {
 #[macro_export]
 macro_rules! day_list {
   ( $($day:literal),* ) => {
-    paste::paste!{ crate::utils::day_list_internal!{$( [<day $day>] ),*} }
+    paste::paste!{ $crate::utils::day_list_internal!{$( [<day $day>] ),*} }
   }
 }
 

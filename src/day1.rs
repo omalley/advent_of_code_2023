@@ -1,5 +1,3 @@
-use std::cmp;
-
 /// One integer per a line with groups divided by blank lines
 ///   1
 ///   2
@@ -16,16 +14,16 @@ pub fn generator(input: &str) -> Vec<Vec<i32>> {
 /// Sum each group and find the maximum
 pub fn part1(input: &[Vec<i32>]) -> i32 {
   input.iter()
-    .map(|v| v.iter().fold(0, |a, &b| a + b))
-    .reduce(|a, b| cmp::max(a,b)).unwrap()
+    .map(|v| v.iter().sum())
+    .max().unwrap()
 }
 
 /// Add the three largest groups
 pub fn part2(input: &[Vec<i32>]) -> i32 {
   let mut calories: Vec<i32> = input.iter()
-    .map(|v| v.iter().fold(0, |a, &b| a + b)).collect();
+    .map(|v| v.iter().sum()).collect();
   calories.sort_unstable_by(|a, b| b.cmp(a));
-  calories.iter().take(3).fold(0, |a, &b| a + b)
+  calories.iter().take(3).sum()
 }
 
 #[cfg(test)]
