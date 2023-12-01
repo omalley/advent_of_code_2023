@@ -1,6 +1,3 @@
-use lazy_static::lazy_static;
-use regex::Regex;
-
 pub fn generator(input: &str) -> Vec<String> {
   input.lines().map(|l| l.to_string()).collect()
 }
@@ -11,55 +8,49 @@ pub fn part1(input: &[String]) -> i32 {
     .map(|v| {
       let first = v.chars().find(|c| c.is_ascii_digit()).unwrap();
       let second = v.chars().rev().find(|c| c.is_ascii_digit()).unwrap();
-      format!("{first}{second}").parse::<i32>().unwrap()})
+      (first as i32 - '0' as i32) * 10 + (second as i32 - '0' as i32)})
     .sum()
 }
 
-// a regex for matching the patterns we are looking for
-lazy_static! {
-  static ref DIGIT_REGEX: Regex =
-    Regex::new(r"([1-9]|one|two|three|four|five|six|seven|eight|nine)").unwrap();
+fn digit(str: &str) -> Option<i32> {
+  match str.chars().next() {
+    Some('o') => if str.starts_with("one") { return Some(1) },
+    Some('t') => if str.starts_with("two") { return Some(2) }
+      else if str.starts_with("three") { return Some(3) },
+    Some('f') => if str.starts_with("four") { return Some(4) }
+      else if str.starts_with("five") { return Some(5) },
+    Some('s') => if str.starts_with("six") { return Some(6) }
+      else if str.starts_with("seven") { return Some(7) },
+    Some('e') => if str.starts_with("eight") { return Some(8) },
+    Some('n') => if str.starts_with("nine") { return Some(9) },
+    Some(ch) => if ch.is_ascii_digit() { return Some(ch as i32 - '0' as i32)},
+    _ => {},
+  }
+  None
 }
 
-/// Translate a 'digit' to the corresponding number.
-fn translate_digit(s: &str) -> i32 {
-  match s {
-    "0" => 0,
-    "1" | "one" => 1,
-    "2" | "two" => 2,
-    "3" | "three" => 3,
-    "4" | "four" => 4,
-    "5" | "five" => 5,
-    "6" | "six" => 6,
-    "7" | "seven" => 7,
-    "8" | "eight" => 8,
-    "9" | "nine" => 9,
-    _ => panic!("Not a digit!"),
+fn first_digit(s: &str) -> i32 {
+  for i in 0..s.len() {
+    if let Some(d) = digit(&s[i..]) {
+      return d
+    }
   }
+  0
+}
+
+fn last_digit(s: &str) -> i32 {
+  for i in (0..s.len()).rev() {
+    if let Some(d) = digit(&s[i..]) {
+      return d
+    }
+  }
+  0
 }
 
 /// Include the word replacements for the digits.
 pub fn part2(input: &[String]) -> i32 {
   input.iter().map(|l| {
-      let mut iter = DIGIT_REGEX.find_iter(l);
-      let first = iter.next().unwrap();
-      let first_digit = translate_digit(first.as_str());
-      // if there isn't a second match, we should reuse the first
-      let second = iter.last().unwrap_or(first);
-
-      // We have to make sure there isn't another match that was hidden by
-      // the one we found. For example, 'twone' the regex will just find
-      // 'two' and not the 'one', so we look for an additional match at
-      // one past the previous match.
-      let second_digit = translate_digit(
-        if let Some(following) = DIGIT_REGEX.find(&l[second.start()+1..]) {
-          following.as_str()
-        } else {
-          second.as_str()
-        }
-      );
-      first_digit * 10 + second_digit
-      })
+      first_digit(l) * 10 + last_digit(l)})
     .sum()
 }
 
