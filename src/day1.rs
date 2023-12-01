@@ -1,54 +1,98 @@
-/// One integer per a line with groups divided by blank lines
-///   1
-///   2
-///
-///   3
-/// = vec!{vec!{1, 2}, vec!{3}}
-pub fn generator(input: &str) -> Vec<Vec<i32>> {
-  input.split("\n\n")
-    .map(|section|
-       section.lines().filter_map(|line| line.parse().ok()).collect())
-    .collect()
+use lazy_static::lazy_static;
+use regex::Regex;
+
+pub fn generator(input: &str) -> Vec<String> {
+  input.lines().map(|l| l.to_string()).collect()
 }
 
-/// Sum each group and find the maximum
-pub fn part1(input: &[Vec<i32>]) -> i32 {
+/// Add each line as first and last digit
+pub fn part1(input: &[String]) -> i32 {
   input.iter()
-    .map(|v| v.iter().sum())
-    .max().unwrap()
+    .map(|v| {
+      let first = v.chars().find(|c| c.is_ascii_digit()).unwrap();
+      let second = v.chars().rev().find(|c| c.is_ascii_digit()).unwrap();
+      format!("{first}{second}").parse::<i32>().unwrap()})
+    .sum()
+}
+
+// a regex for matching the patterns we are looking for
+lazy_static! {
+  static ref DIGIT_REGEX: Regex =
+    Regex::new(r"([1-9]|one|two|three|four|five|six|seven|eight|nine)").unwrap();
+}
+
+/// Translate a 'digit' to the corresponding number.
+fn translate_digit(s: &str) -> i32 {
+  match s {
+    "0" => 0,
+    "1" | "one" => 1,
+    "2" | "two" => 2,
+    "3" | "three" => 3,
+    "4" | "four" => 4,
+    "5" | "five" => 5,
+    "6" | "six" => 6,
+    "7" | "seven" => 7,
+    "8" | "eight" => 8,
+    "9" | "nine" => 9,
+    _ => panic!("Not a digit!"),
+  }
 }
 
 /// Add the three largest groups
-pub fn part2(input: &[Vec<i32>]) -> i32 {
-  let mut calories: Vec<i32> = input.iter()
-    .map(|v| v.iter().sum()).collect();
-  calories.sort_unstable_by(|a, b| b.cmp(a));
-  calories.iter().take(3).sum()
+pub fn part2(input: &[String]) -> i32 {
+  input.iter().map(|l| {
+      let mut iter = DIGIT_REGEX.find_iter(l);
+      let first = iter.next().unwrap();
+      let first_digit = translate_digit(first.as_str());
+      let mut second = iter.last();
+      // if there isn't a second match, we should reuse the first
+      if second.is_none() {
+        second = Some(first.clone());
+      }
+      // We have to make sure there isn't another match that was hidden by
+      // the one we found. For example, 'twone' the regex will just find
+      // 'two' and not the 'one', so we look for an additional match at
+      // one past the previous match.
+      let second_digit = translate_digit(
+        if let Some(following) = DIGIT_REGEX.find(&l[second.unwrap().start()+1..]) {
+          following.as_str()
+        } else {
+          second.unwrap().as_str()
+        }
+      );
+      first_digit * 10 + second_digit
+      })
+    .sum()
 }
 
 #[cfg(test)]
 mod tests {
   use crate::day1::{generator, part1, part2};
 
-  #[test]
-  fn parsing_test() {
-    let result= generator("1\n2\n\n3\n4\n5");
-    assert_eq!(vec!{vec!{1, 2}, vec!{3, 4, 5}}, result);
-  }
-
-  const INPUT: &str = "1000\n2000\n3000\n\n\
-                       4000\n\n\
-                       5000\n6000\n\n\
-                       7000\n8000\n9000\n\n\
-                       10000";
+  const INPUT: &str =
+"1abc2
+pqr3stu8vwx
+a1b2c3d4e5f
+treb7uchet";
 
   #[test]
   fn test_part1() {
-    assert_eq!(24000, part1(&generator(INPUT)));
+    assert_eq!(142, part1(&generator(INPUT)));
   }
+
+  const INPUT2: &str =
+"two1nine
+eightwothree
+abcone2threexyz
+xtwone3four
+4nineeightseven2
+zoneight234
+7pqrstsixteen";
 
   #[test]
   fn test_part2() {
-    assert_eq!(45000, part2(&generator(INPUT)));
+    assert_eq!(142, part2(&generator(INPUT)));
+    assert_eq!(281, part2(&generator(INPUT2)));
+    assert_eq!(21, part2(&generator("twone")));
   }
 }
