@@ -44,20 +44,18 @@ pub fn part2(input: &[String]) -> i32 {
       let mut iter = DIGIT_REGEX.find_iter(l);
       let first = iter.next().unwrap();
       let first_digit = translate_digit(first.as_str());
-      let mut second = iter.last();
       // if there isn't a second match, we should reuse the first
-      if second.is_none() {
-        second = Some(first);
-      }
+      let second = iter.last().unwrap_or(first);
+
       // We have to make sure there isn't another match that was hidden by
       // the one we found. For example, 'twone' the regex will just find
       // 'two' and not the 'one', so we look for an additional match at
       // one past the previous match.
       let second_digit = translate_digit(
-        if let Some(following) = DIGIT_REGEX.find(&l[second.unwrap().start()+1..]) {
+        if let Some(following) = DIGIT_REGEX.find(&l[second.start()+1..]) {
           following.as_str()
         } else {
-          second.unwrap().as_str()
+          second.as_str()
         }
       );
       first_digit * 10 + second_digit
