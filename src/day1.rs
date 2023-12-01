@@ -38,7 +38,7 @@ fn translate_digit(s: &str) -> i32 {
   }
 }
 
-/// Add the three largest groups
+/// Include the word replacements for the digits.
 pub fn part2(input: &[String]) -> i32 {
   input.iter().map(|l| {
       let mut iter = DIGIT_REGEX.find_iter(l);
@@ -47,7 +47,7 @@ pub fn part2(input: &[String]) -> i32 {
       let mut second = iter.last();
       // if there isn't a second match, we should reuse the first
       if second.is_none() {
-        second = Some(first.clone());
+        second = Some(first);
       }
       // We have to make sure there isn't another match that was hidden by
       // the one we found. For example, 'twone' the regex will just find
