@@ -32,7 +32,7 @@ pub struct Game {
 impl Game {
   fn from_str(s: &str) -> Self {
     let (title, draw_string) = s.split_once(':').unwrap();
-    let id = title.split_whitespace().skip(1).next().unwrap().parse().unwrap();
+    let id = title.split_whitespace().nth(1).unwrap().parse().unwrap();
     let draws = draw_string.split(';').map(Draw::from_str).collect();
     Game{id, draws}
   }
@@ -67,7 +67,10 @@ pub fn part1(input: &[Game]) -> i32 {
 }
 
 pub fn part2(input: &[Game]) -> i32 {
-  0
+  input.iter().map(|g| {
+      let max = g.max_rocks();
+      max.red * max.blue * max.green})
+    .sum()
 }
 
 #[cfg(test)]
@@ -88,6 +91,6 @@ Game 5: 6 red, 1 blue, 3 green; 2 blue, 1 red, 2 green";
 
   #[test]
   fn test_part2() {
-    // assert_eq!(142, part2(&generator(INPUT)));
+    assert_eq!(2286, part2(&generator(INPUT)));
   }
 }
