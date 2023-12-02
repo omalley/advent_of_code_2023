@@ -5,21 +5,26 @@ pub struct Draw {
   green: i32,
 }
 
+fn parse_int(s: &str) -> Result<i32, String> {
+  s.parse().map_err(|_| format!("Can't parse integer - {s}"))
+}
+
 impl Draw {
-  fn from_str(s: &str) -> Self {
+  fn from_str(s: &str) -> Result<Self, String> {
     let mut red = 0;
     let mut blue = 0;
     let mut green = 0;
-    for draw_str in s.split(',').map(|s| s.trim()) {
-      let (count, color) = draw_str.split_once(' ').unwrap();
+    for draw_str in s.split(", ") {
+      let (count, color) = draw_str.split_once(' ')
+        .ok_or("1 word in term")?;
       match color {
-        "red" => red += count.parse::<i32>().unwrap(),
-        "blue" => blue += count.parse::<i32>().unwrap(),
-        "green" => green += count.parse::<i32>().unwrap(),
-        _ => {},
+        "red" => red += parse_int(count)?,
+        "blue" => blue += parse_int(count)?,
+        "green" => green += parse_int(count)?,
+        _ => return Err(format!("Unknown color: {color}")),
       }
     }
-    Draw{red, blue, green}
+    Ok(Draw{red, blue, green})
   }
 }
 
@@ -30,11 +35,12 @@ pub struct Game {
 }
 
 impl Game {
-  fn from_str(s: &str) -> Self {
-    let (title, draw_string) = s.split_once(':').unwrap();
-    let id = title.split_whitespace().nth(1).unwrap().parse().unwrap();
-    let draws = draw_string.split(';').map(Draw::from_str).collect();
-    Game{id, draws}
+  fn from_str(s: &str) -> Result<Self,String> {
+    let (title, draw_string) = s.split_once(": ").ok_or("Can't parse game")?;
+    let id = parse_int(title.split_whitespace().nth(1).ok_or("Can't parse title")?)?;
+    let draws = draw_string.split("; ")
+      .map(Draw::from_str).collect::<Result<Vec<Draw>, String>>()?;
+    Ok(Game{id, draws})
   }
 
   fn max_rocks(&self) -> Draw {
@@ -51,17 +57,19 @@ impl Game {
 }
 
 pub fn generator(input: &str) -> Vec<Game> {
-  input.lines().map(Game::from_str).collect()
+  input.lines()
+    .map(|l| Game::from_str(l)
+      .map_err(|e| format!("Can't parse game with error [{e}] in {l}")))
+    .collect::<Result<Vec<Game>, String>>()
+    .unwrap() // panics on error
 }
 
-static MAX_RED: i32 = 12;
-static MAX_GREEN: i32 = 13;
-static MAX_BLUE: i32 = 14;
+static MAX_DRAW: Draw = Draw{red: 12, green: 13, blue: 14};
 
 pub fn part1(input: &[Game]) -> i32 {
   input.iter().filter(|g| {
       let max = g.max_rocks();
-      max.red <= MAX_RED && max.green <= MAX_GREEN && max.blue <= MAX_BLUE})
+      max.red <= MAX_DRAW.red && max.green <= MAX_DRAW.green && max.blue <= MAX_DRAW.blue})
     .map(|g| g.id)
     .sum()
 }
