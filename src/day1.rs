@@ -29,17 +29,8 @@ fn digit(str: &str) -> Option<i32> {
   None
 }
 
-fn first_digit(s: &str) -> i32 {
-  for i in 0..s.len() {
-    if let Some(d) = digit(&s[i..]) {
-      return d
-    }
-  }
-  0
-}
-
-fn last_digit(s: &str) -> i32 {
-  for i in (0..s.len()).rev() {
+fn find_digit(s: &str, itr: &mut dyn Iterator<Item=usize>) -> i32 {
+  for i in itr {
     if let Some(d) = digit(&s[i..]) {
       return d
     }
@@ -50,7 +41,8 @@ fn last_digit(s: &str) -> i32 {
 /// Include the word replacements for the digits.
 pub fn part2(input: &[String]) -> i32 {
   input.iter().map(|l| {
-      first_digit(l) * 10 + last_digit(l)})
+      find_digit(l, &mut (0..l.len())) * 10 +
+        find_digit(l, &mut (0..l.len()).rev())})
     .sum()
 }
 
