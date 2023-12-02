@@ -6,7 +6,7 @@ framework that I forked from
 [here](https://gitlab.com/mbryant/aoc-2021/), but now is noticeably
 different. In 2021, I started using Advent of Code to learn Rust and I
 highly recommend that strategy. Learning new programming languages is
-hard with out using them to solve problems and Advent of Code provides
+hard without using them to solve problems and Advent of Code provides
 nice challenges where you won't have to support your code years from
 now.
 
@@ -18,9 +18,9 @@ The three targets that I use are:
 * cargo test
 * cargo bench
 
-The run target will run all of the defined days by default. If you
+The run target will run all the defined days by default. If you
 only want to run one day, give the day number as a cli parameter. By
-default the input comes from input/dayX.txt, unless you pass the -i
+default, the input comes from input/dayX.txt, unless you pass the -i
 parameter with a directory to use instead.
 
 Each day is put into a file src/dayX.rs and input/dayX.txt. You need
