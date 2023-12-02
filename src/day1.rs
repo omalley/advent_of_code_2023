@@ -12,6 +12,7 @@ pub fn part1(input: &[String]) -> i32 {
     .sum()
 }
 
+/// Does the given string start with a digit (numeric or name)? If so, return its value.
 fn digit(str: &str) -> Option<i32> {
   match str.chars().next() {
     Some('o') => if str.starts_with("one") { return Some(1) },
@@ -29,6 +30,7 @@ fn digit(str: &str) -> Option<i32> {
   None
 }
 
+/// Find the first or last digit in the string, depending on the passed in iterator.
 fn find_digit(s: &str, itr: &mut dyn Iterator<Item=usize>) -> i32 {
   for i in itr {
     if let Some(d) = digit(&s[i..]) {
