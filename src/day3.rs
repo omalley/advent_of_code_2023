@@ -1,3 +1,9 @@
+// This program is fundamentally about finding the numbers that are
+// next to specific symbols in the grid.
+// I broke my solution into two parts:
+// * Find all of the locations that are adjacent to the symbols.
+// * Process all of the numbers, determining their value and proximity
+//   to symbols.
 use smallvec::SmallVec;
 
 #[derive(Debug)]
@@ -29,7 +35,7 @@ trait NeighborTracker {
   fn mark(&mut self, x: usize, y:usize, id: usize);
 }
 
-/// Mark the board squares that are adjacent to a symbol that satisfies
+/// Mark the board squares that are adjacent to each symbol that satisfies
 /// the given filter.
 fn find_neighbors<F>(result: &mut dyn NeighborTracker, board: &Board, filter: F)
     where F: Fn(char) -> bool {
@@ -66,20 +72,26 @@ impl NeighborTracker for SymbolNeighbors {
 
 /// Generic interface for scanning over the board and categorizing
 /// the locations as digits or other.
-trait BoardProcessor {
+trait NumberProcessor {
   fn add_digit(&mut self, ch: char, x: usize, y: usize);
-  fn add_other(&mut self, ch: char, x: usize, y: usize);
+  fn end_number(&mut self);
 }
 
-fn process_board(processor: &mut dyn BoardProcessor, board: &Board) {
+fn process_board(processor: &mut dyn NumberProcessor, board: &Board) {
   // Go through the board by row
   for (y, row) in board.field.iter().enumerate() {
+    let mut in_number = false;
     for (x, spot) in row.iter().enumerate() {
       if spot.is_ascii_digit() {
+        in_number = true;
         processor.add_digit(*spot, x, y);
-      } else {
-        processor.add_other(*spot, x, y);
+      } else if in_number {
+        processor.end_number();
+        in_number = false;
       }
+    }
+    if in_number {
+      processor.end_number();
     }
   }
 }
@@ -93,7 +105,7 @@ struct PartCounter {
   result: i32,
 }
 
-impl BoardProcessor for PartCounter {
+impl NumberProcessor for PartCounter {
   fn add_digit(&mut self, ch: char, x: usize, y: usize) {
     // for a string of digits, just one location has to be next to a symbol
     self.include_current = self.include_current || self.symbol_neighbors.is_neighbor[y][x];
@@ -101,7 +113,7 @@ impl BoardProcessor for PartCounter {
     self.current = self.current * 10 + ch as i32 - '0' as i32;
   }
 
-  fn add_other(&mut self, _: char, _: usize, _: usize) {
+  fn end_number(&mut self) {
     // If we have finished a number and it should be included, update the result.
     if self.include_current {
       self.result += self.current;
@@ -146,7 +158,7 @@ struct GearCounter {
   result: Vec<Vec<i32>>,
 }
 
-impl BoardProcessor for crate::day3::GearCounter {
+impl NumberProcessor for GearCounter {
   fn add_digit(&mut self, ch: char, x: usize, y: usize) {
     // Keep track of the set of all gears this number is next to.
     for new_gear in &self.gear_map.neighbors[y][x] {
@@ -157,13 +169,11 @@ impl BoardProcessor for crate::day3::GearCounter {
     self.current = self.current * 10 + ch as i32 - '0' as i32;
   }
 
-  fn add_other(&mut self, _: char, _: usize, _: usize) {
+  fn end_number(&mut self) {
     // At the end of the number, append it to the list of numbers for each
     // adjacent gear.
-    if self.current != 0 {
-      for gear in &self.current_gears {
-        self.result[*gear].push(self.current);
-      }
+    for gear in &self.current_gears {
+      self.result[*gear].push(self.current);
     }
     self.current_gears.clear();
     self.current = 0;
