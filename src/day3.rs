@@ -73,7 +73,7 @@ impl NeighborTracker for SymbolNeighbors {
 /// Generic interface for scanning over the board and categorizing
 /// the locations as digits or other.
 trait NumberProcessor {
-  fn add_digit(&mut self, ch: char, x: usize, y: usize);
+  fn add_digit(&mut self, digit: i32, x: usize, y: usize);
   fn end_number(&mut self);
 }
 
@@ -84,7 +84,7 @@ fn process_board(processor: &mut dyn NumberProcessor, board: &Board) {
     for (x, spot) in row.iter().enumerate() {
       if spot.is_ascii_digit() {
         in_number = true;
-        processor.add_digit(*spot, x, y);
+        processor.add_digit(*spot as i32 - '0' as i32, x, y);
       } else if in_number {
         processor.end_number();
         in_number = false;
@@ -106,11 +106,11 @@ struct PartCounter {
 }
 
 impl NumberProcessor for PartCounter {
-  fn add_digit(&mut self, ch: char, x: usize, y: usize) {
+  fn add_digit(&mut self, digit: i32, x: usize, y: usize) {
     // for a string of digits, just one location has to be next to a symbol
     self.include_current = self.include_current || self.symbol_neighbors.is_neighbor[y][x];
     // keep the current value of the number
-    self.current = self.current * 10 + ch as i32 - '0' as i32;
+    self.current = self.current * 10 + digit;
   }
 
   fn end_number(&mut self) {
@@ -159,14 +159,14 @@ struct GearCounter {
 }
 
 impl NumberProcessor for GearCounter {
-  fn add_digit(&mut self, ch: char, x: usize, y: usize) {
+  fn add_digit(&mut self, digit: i32, x: usize, y: usize) {
     // Keep track of the set of all gears this number is next to.
     for new_gear in &self.gear_map.neighbors[y][x] {
       if !self.current_gears.contains(new_gear) {
         self.current_gears.push(*new_gear);
       }
     }
-    self.current = self.current * 10 + ch as i32 - '0' as i32;
+    self.current = self.current * 10 + digit;
   }
 
   fn end_number(&mut self) {
