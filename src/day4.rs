@@ -1,18 +1,14 @@
 use std::cmp::Ordering;
-use crate::day2::Game;
 
 #[derive(Debug)]
 pub struct Card {
-  id: u32,
   wins: Vec<u32>,
   picks: Vec<u32>,
 }
 
 impl Card {
   fn from_str(s: &str) -> Result<Self,String> {
-    let (title, contents) = s.split_once(": ").ok_or("Can't parse card")?;
-    let id = title.split_whitespace().nth(1).ok_or("Can't parse title")?
-        .parse::<u32>().map_err(|_| "Can't parse id")?;
+    let (_, contents) = s.split_once(": ").ok_or("Can't parse card")?;
     let (win_str, pick_str) = contents.split_once(" | ")
         .ok_or("Can find wins")?;
     let mut wins = win_str.split_whitespace()
@@ -23,10 +19,10 @@ impl Card {
         .map(|w| w.parse::<u32>().map_err(|_|format!("Can't parse number {w}")))
         .collect::<Result<Vec<u32>, String>>()?;
     picks.sort_unstable();
-    Ok(Card{id, wins, picks})
+    Ok(Card{wins, picks})
   }
 
-  fn score(&self) -> i32 {
+  fn matches(&self) -> usize {
     let mut w = 0;
     let mut p = 0;
     let mut matches = 0;
@@ -41,6 +37,11 @@ impl Card {
         Ordering::Greater => p += 1,
       }
     }
+    matches
+  }
+
+  fn score(&self) -> i32 {
+    let matches = self.matches();
     if matches == 0 {
       0
     } else {
@@ -57,12 +58,19 @@ pub fn generator(input: &str) -> Vec<Card> {
       .unwrap() // panics on error
 }
 
-pub fn part1(cards: &Vec<Card>) -> i32 {
+pub fn part1(cards: &[Card]) -> i32 {
   cards.iter().map(|c| c.score()).sum()
 }
 
-pub fn part2(cards: &Vec<Card>) -> i32 {
-  0
+pub fn part2(cards: &[Card]) -> i32 {
+  let mut counts = vec![1; cards.len()];
+  for (i, card) in cards.iter().enumerate() {
+    let matches = card.matches();
+    for winning in i+1..(i+matches+1).min(counts.len()) {
+      counts[winning] += counts[i];
+    }
+  }
+  counts.iter().sum()
 }
 
 #[cfg(test)]
@@ -84,6 +92,6 @@ Card 6: 31 18 13 56 72 | 74 77 10 23 35 67 36 11";
 
   #[test]
   fn test_part2() {
-    //assert_eq!(467835, part2(&generator(INPUT)));
+    assert_eq!(30, part2(&generator(INPUT)));
   }
 }
