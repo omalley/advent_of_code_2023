@@ -1,40 +1,32 @@
 use itertools::Itertools;
 use std::ops::Range;
 
-#[derive(Debug,Eq,Ord,PartialEq,PartialOrd)]
+#[derive(Debug,Eq,PartialEq)]
 pub struct Rule {
-  source: i64,
-  length: i64,
-  destination: i64,
+  source: Range<i64>,
+  offset: i64, // what is added to the source to move to the destination
 }
 
 fn parse_int(s: Option<&str>, field_name: &str) -> Result<i64, String> {
   s.ok_or(format!("missing field {field_name}"))?.parse()
       .map_err(|_| format!("Can't parse integer - {}", s.unwrap()))
 }
+
 impl Rule {
   fn from_str(s: &str) -> Result<Self,String> {
     let mut word_itr = s.split_whitespace();
     let destination = parse_int(word_itr.next(), "destination")?;
     let source = parse_int(word_itr.next(), "source")?;
     let length = parse_int(word_itr.next(), "length")?;
-    Ok(Rule{source, length, destination})
+    Ok(Rule{source:source..source+length, offset:destination-source})
   }
 
   fn apply(&self, val: i64) -> Option<i64> {
-    if (self.source..self.source+self.length).contains(&val) {
-      Some(self.destination + val - self.source)
+    if self.source.contains(&val) {
+      Some(val + self.offset)
     } else {
       None
     }
-  }
-
-  fn source_end(&self) -> i64 {
-    self.source + self.length
-  }
-
-  fn offset(&self) -> i64 {
-    self.destination - self.source
   }
 }
 
@@ -47,7 +39,7 @@ impl KindTranslation {
   fn from_str(s: &str) -> Result<Self, String> {
     let mut rules = s.lines().skip(1).map(Rule::from_str)
         .collect::<Result<Vec<Rule>, String>>()?;
-    rules.sort_unstable();
+    rules.sort_unstable_by_key(|r| r.source.start);
     Ok(KindTranslation{rules})
   }
 
@@ -63,19 +55,19 @@ impl KindTranslation {
       while current_val < rng.end {
         // Look through the rules until we find one that may be active
         while current_rule < self.rules.len() &&
-            self.rules[current_rule].source_end() <= current_val {
+            self.rules[current_rule].source.end <= current_val {
           current_rule += 1;
         }
         if current_rule == self.rules.len() {
           result.push(current_val..rng.end);
           current_val = rng.end;
-        } else if current_val < self.rules[current_rule].source {
-          let new_end = rng.end.min(self.rules[current_rule].source);
+        } else if current_val < self.rules[current_rule].source.start {
+          let new_end = rng.end.min(self.rules[current_rule].source.start);
           result.push(current_val..new_end);
           current_val = new_end;
         } else {
-          let new_end = rng.end.min(self.rules[current_rule].source_end());
-          let offset = self.rules[current_rule].offset();
+          let new_end = rng.end.min(self.rules[current_rule].source.end);
+          let offset = self.rules[current_rule].offset;
           result.push(current_val+offset..new_end+offset);
           current_val = new_end;
         }
