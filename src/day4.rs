@@ -16,9 +16,9 @@ fn read_numbers(s: &str) -> Result<Vec<u32>, String> {
 
 impl Card {
   fn from_str(s: &str) -> Result<Self,String> {
-    let (_, contents) = s.split_once(": ").ok_or("Can't parse card")?;
-    let (win_str, pick_str) = contents.split_once(" | ")
-        .ok_or("Can't find wins")?;
+    let (_, contents) = s.split_once(":").ok_or("Can't find header separator")?;
+    let (win_str, pick_str) = contents.split_once("|")
+        .ok_or("Can't find wins separator")?;
     Ok(Card{wins: read_numbers(win_str)?, picks: read_numbers(pick_str)?})
   }
 
