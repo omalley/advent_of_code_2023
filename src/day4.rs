@@ -6,20 +6,20 @@ pub struct Card {
   picks: Vec<u32>,
 }
 
+fn read_numbers(s: &str) -> Result<Vec<u32>, String> {
+  let mut result = s.split_whitespace()
+      .map(|w| w.parse::<u32>().map_err(|_| format!("Can't parse number {w}")))
+      .collect::<Result<Vec<u32>, String>>()?;
+  result.sort_unstable();
+  Ok(result)
+}
+
 impl Card {
   fn from_str(s: &str) -> Result<Self,String> {
     let (_, contents) = s.split_once(": ").ok_or("Can't parse card")?;
     let (win_str, pick_str) = contents.split_once(" | ")
-        .ok_or("Can find wins")?;
-    let mut wins = win_str.split_whitespace()
-        .map(|w| w.parse::<u32>().map_err(|_| format!("Can't parse number {w}")))
-        .collect::<Result<Vec<u32>, String>>()?;
-    wins.sort_unstable();
-    let mut picks = pick_str.split_whitespace()
-        .map(|w| w.parse::<u32>().map_err(|_|format!("Can't parse number {w}")))
-        .collect::<Result<Vec<u32>, String>>()?;
-    picks.sort_unstable();
-    Ok(Card{wins, picks})
+        .ok_or("Can't find wins")?;
+    Ok(Card{wins: read_numbers(win_str)?, picks: read_numbers(pick_str)?})
   }
 
   fn matches(&self) -> usize {
