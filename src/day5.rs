@@ -1,3 +1,6 @@
+use itertools::Itertools;
+use std::ops::Range;
+
 #[derive(Debug,Eq,Ord,PartialEq,PartialOrd)]
 pub struct Rule {
   source: i64,
@@ -25,6 +28,14 @@ impl Rule {
       None
     }
   }
+
+  fn source_end(&self) -> i64 {
+    self.source + self.length
+  }
+
+  fn offset(&self) -> i64 {
+    self.destination - self.source
+  }
 }
 
 #[derive(Debug)]
@@ -40,8 +51,37 @@ impl KindTranslation {
     Ok(KindTranslation{rules})
   }
 
-  fn apply(&self, val: i64) -> i64 {
+  fn translate(&self, val: i64) -> i64 {
     self.rules.iter().filter_map(|r| r.apply(val)).next().unwrap_or(val)
+  }
+
+  fn translate_ranges(&self, ranges: &[Range<i64>]) -> Vec<Range<i64>> {
+    let mut result = Vec::new();
+    for rng in ranges {
+      let mut current_rule = 0;
+      let mut current_val = rng.start;
+      while current_val < rng.end {
+        // Look through the rules until we find one that may be active
+        while current_rule < self.rules.len() &&
+            self.rules[current_rule].source_end() <= current_val {
+          current_rule += 1;
+        }
+        if current_rule == self.rules.len() {
+          result.push(current_val..rng.end);
+          current_val = rng.end;
+        } else if current_val < self.rules[current_rule].source {
+          let new_end = rng.end.min(self.rules[current_rule].source);
+          result.push(current_val..new_end);
+          current_val = new_end;
+        } else {
+          let new_end = rng.end.min(self.rules[current_rule].source_end());
+          let offset = self.rules[current_rule].offset();
+          result.push(current_val+offset..new_end+offset);
+          current_val = new_end;
+        }
+      }
+    }
+    result
   }
 }
 
@@ -56,10 +96,9 @@ impl Almanac {
     let mut itr = s.split("\n\n");
     let (_, seed_list) = itr.next().ok_or("Missing seed deliminator")?
         .split_once(':').ok_or("Missing seed list")?;
-    let mut seeds: Vec<i64> = seed_list.split_whitespace()
+    let seeds: Vec<i64> = seed_list.split_whitespace()
         .map(|w| w.parse::<i64>().map_err(|_| format!("Can't parse integer {w}")))
         .collect::<Result<Vec<i64>,String>>()?;
-    seeds.sort_unstable();
     Ok(Almanac{seeds, translations: itr.map(KindTranslation::from_str)
         .collect::<Result<Vec<KindTranslation>,String>>()?})
   }
@@ -67,7 +106,15 @@ impl Almanac {
   fn translate(&self, seed: i64) -> i64 {
     let mut val = seed;
     for tr in &self.translations {
-      val = tr.apply(val);
+      val = tr.translate(val);
+    }
+    val
+  }
+
+  fn translate_ranges(&self, seed: &[Range<i64>]) -> Vec<Range<i64>> {
+    let mut val = seed.to_vec();
+    for tr in &self.translations {
+      val = tr.translate_ranges(&val);
     }
     val
   }
@@ -83,12 +130,14 @@ pub fn part1(almanac: &Almanac) -> i64 {
 }
 
 pub fn part2(almanac: &Almanac) -> i64 {
-  0
+  let seed_ranges = almanac.seeds.iter().tuples::<(_,_)>()
+      .map(|(start,len)| *start..*start+*len).collect::<Vec<Range<i64>>>();
+  almanac.translate_ranges(&seed_ranges).iter().map(|r| r.start).min().unwrap()
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day5::{generator, part1, part2};
+  use crate::day5::{generator, KindTranslation, part1, part2};
 
   const INPUT: &str =
 "seeds: 79 14 55 13
@@ -131,7 +180,19 @@ humidity-to-location map:
   }
 
   #[test]
+  fn test_translation() {
+    let trans =
+        KindTranslation::from_str("foo map:\n100 1000 50\n200 2000 25").unwrap();
+    assert_eq!(vec![1..1000, 100..150, 1050..2000, 200..225, 2025..3000],
+               trans.translate_ranges(&[1..3000]));
+    assert_eq!(vec![103..105],
+               trans.translate_ranges(&[1003..1005]));
+    assert_eq!(vec![4000..4011],
+               trans.translate_ranges(&[4000..4011]));
+  }
+
+  #[test]
   fn test_part2() {
-    //assert_eq!(30, part2(&generator(INPUT)));
+    assert_eq!(46, part2(&generator(INPUT)));
   }
 }
