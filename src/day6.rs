@@ -23,9 +23,12 @@ impl Race {
 
   fn find_wins(&self) -> u64 {
     let time = self.time as f64;
-    let mid = time / 2.0;
     let swing = f64::sqrt(time * time - 4.0 * self.record as f64) / 2.0;
-    (mid + swing).ceil() as u64 - (mid - swing + 1.0).floor() as u64
+    if self.time % 2 == 0 {
+      swing.ceil() as u64 * 2 - 1
+    } else {
+      (swing - 0.5).ceil() as u64 * 2
+    }
   }
 }
 
@@ -38,22 +41,17 @@ pub fn part1(races: &[Race]) -> u64 {
   races.iter().map(|r| r.find_wins()).product()
 }
 
-fn munge_numbers(seq: &[u64]) -> u64 {
-  let mut result: u64 = 0;
-  for n in seq {
-    let power = if *n == 0 {
-      1
-    } else {
-      n.ilog10() + 1
-    };
-    result = result * 10u64.pow(power) + n;
-  }
-  result
+fn append_number(base: u64, right: u64) -> u64 {
+  base * 10_u64.pow(right.checked_ilog10().unwrap_or(0)+1) + right
 }
 
 pub fn part2(races: &[Race]) -> u64 {
-  let time = munge_numbers(&races.iter().map(|r| r.time).collect::<Vec<u64>>());
-  let record = munge_numbers(&races.iter().map(|r| r.record).collect::<Vec<u64>>());
+  let mut time: u64 = 0;
+  let mut record: u64 = 0;
+  for r in races {
+    time = append_number(time, r.time);
+    record = append_number(record, r.record);
+  }
   Race{time, record}.find_wins()
 }
 
