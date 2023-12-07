@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 #[derive(Clone,Copy,Debug,Eq,Ord,PartialEq,PartialOrd)]
 pub enum Rank {
   Two, Three, Four, Five, Six, Seven, Eight, Nine, Ten, Jack, Queen, King, Ace,
@@ -33,20 +35,28 @@ pub enum HandKind {
   HighCard, OnePair, TwoPair, ThreeOfAKind, FullHouse, FourOfAKind, FiveOfAKind,
 }
 
+const HAND_SIZE: usize = 5;
+
 #[derive(Clone,Debug,Eq,Ord,PartialEq,PartialOrd)]
 pub struct Hand {
   kind: HandKind,
-  cards: Vec<Rank>,
+  cards: [Rank; HAND_SIZE],
   bid: u64,
 }
 
 impl Hand {
-  fn get_kind(cards: &[Rank]) -> Result<HandKind,String> {
+  fn get_kind(cards: &[Rank], jacks_wild: bool) -> Result<HandKind,String> {
     let mut counts = [0; 13];
+    let mut wild_cards = 0;
     for c in cards {
       counts[*c as usize] += 1;
     }
+    if jacks_wild {
+      wild_cards = counts[Rank::Jack as usize];
+      counts[Rank::Jack as usize] = 0;
+    }
     counts.sort_by(|a, b| b.cmp(a));
+    counts[0] += wild_cards;
     match counts[0] {
       1 => Ok(HandKind::HighCard),
       2 => Ok(if counts[1] == 1 { HandKind::OnePair} else { HandKind::TwoPair }),
@@ -59,12 +69,36 @@ impl Hand {
 
   fn from_str(s: &str) -> Result<Self, String> {
     let mut words = s.split_whitespace();
-    let cards = Rank::from_str(words.next()
-        .ok_or(format!("Missing cards in {s}"))?)?;
+    let cards: [Rank; HAND_SIZE] = Rank::from_str(words.next()
+        .ok_or(format!("Missing cards in {s}"))?)?.try_into().unwrap();
     let bid = words.next().ok_or("Missing bid")?
         .parse::<u64>().map_err(|_| format!("Can't parse bid in {s}"))?;
-    let kind = Self::get_kind(&cards)?;
+    let kind = Self::get_kind(&cards, false)?;
     Ok(Hand{kind, cards, bid})
+  }
+
+  fn low_jack_cmp(&self, other: &Self) -> Ordering {
+    match self.kind.cmp(&other.kind) {
+      Ordering::Less => Ordering::Less,
+      Ordering::Equal => {
+        for i in 0..HAND_SIZE {
+          if self.cards[i] != other.cards[i] {
+            if self.cards[i] == Rank::Jack {
+              return Ordering::Less
+            } else if other.cards[i] == Rank::Jack {
+              return Ordering::Greater
+            }
+            match self.cards[i].cmp(&other.cards[i]) {
+              Ordering::Less => return Ordering::Less,
+              Ordering::Greater => return Ordering::Greater,
+              _ => {},
+            }
+          }
+        }
+        Ordering::Equal
+      }
+      Ordering::Greater => Ordering::Greater,
+    }
   }
 }
 
@@ -80,7 +114,12 @@ pub fn part1(input: &[Hand]) -> u64 {
 }
 
 pub fn part2(input: &[Hand]) -> u64 {
-  0
+  let mut hands = input.to_vec();
+  for h in hands.iter_mut() {
+    h.kind = Hand::get_kind(&h.cards, true).unwrap();
+  }
+  hands.sort_unstable_by(|l, r| l.low_jack_cmp(r));
+  hands.iter().enumerate().map(|(i, c) | (i as u64 + 1) * c.bid).sum()
 }
 
 #[cfg(test)]
@@ -101,6 +140,6 @@ QQQJA 483";
 
   #[test]
   fn test_part2() {
-    assert_eq!(0, part2(&generator(INPUT)));
+    assert_eq!(5905, part2(&generator(INPUT)));
   }
 }
