@@ -50,15 +50,22 @@ impl Hand {
     }
     let wild_cards = counts[Rank::WildJack as usize];
     counts[Rank::WildJack as usize] = 0;
-    counts.sort_by(|a, b| b.cmp(a));
-    counts[0] += wild_cards;
-    match counts[0] {
+    let mut max = 0;
+    let mut distinct = 0;
+    for cnt in counts {
+      if cnt != 0 {
+        max = max.max(cnt);
+        distinct += 1;
+      }
+    }
+    max += wild_cards;
+    match max {
       1 => Ok(HandKind::HighCard),
-      2 => Ok(if counts[1] == 1 { HandKind::OnePair } else { HandKind::TwoPair }),
-      3 => Ok(if counts[1] == 1 { HandKind::ThreeOfAKind } else { HandKind::FullHouse }),
+      2 => Ok(if distinct == 4 { HandKind::OnePair } else { HandKind::TwoPair }),
+      3 => Ok(if distinct == 3 { HandKind::ThreeOfAKind } else { HandKind::FullHouse }),
       4 => Ok(HandKind::FourOfAKind),
       5 => Ok(HandKind::FiveOfAKind),
-      _ => Err(format!("Bad hand kind with {}", counts[0])),
+      _ => Err(format!("Bad hand kind with {}", max)),
     }
   }
 
