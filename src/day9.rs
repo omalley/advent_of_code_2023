@@ -1,62 +1,125 @@
-type ValueType = i64;
-
-fn read_numbers(s: &str) -> Result<Vec<ValueType>, String> {
-  s.split_whitespace()
-      .map(|w| w.parse::<ValueType>().map_err(|_| format!("Can't parse number {w}")))
-      .collect::<Result<Vec<ValueType>, String>>()
+pub fn generator(input: &str) -> Vec<Vec<i32>> {
+  input.lines()
+    .map(|line| line.split_whitespace().map(|n| n.parse().unwrap()).collect())
+    .collect()
 }
 
-pub fn generator(input: &str) -> Vec<Vec<ValueType>> {
-  input.lines().map(read_numbers).collect::<Result<Vec<Vec<ValueType>>,String>>()
-      .unwrap() // panics on error
+#[derive(Default)]
+pub struct HistoryLine {
+  values: Vec<i32>,
 }
 
-fn build_differences(series: &[ValueType]) -> Vec<ValueType> {
-  series[1..].iter().enumerate()
-      .map(|(i, val) | val - series[i]).collect::<Vec<ValueType>>()
-}
+impl HistoryLine {
+  fn _from(line: &str, reverse: bool) -> HistoryLine {
+    let nums: Vec<i32> = line.split_whitespace()
+      .map(|n| n.parse().unwrap()).collect();
+    if reverse {
+      HistoryLine::from_nums(&mut nums.iter().rev())
+    } else {
+      HistoryLine::from_nums(&mut nums.iter())
+    }
+  }
 
-fn find_next(series: &[ValueType]) -> ValueType {
-  if series.iter().all(| val| *val == 0) {
-    0
-  } else {
-    find_next(&build_differences(series)) + series.last().unwrap()
+  fn from_nums(nums: &mut dyn Iterator<Item=&i32>) -> HistoryLine {
+    let mut hl = HistoryLine::default();
+    hl.add(nums);
+    hl
+  }
+
+  fn add(&mut self, itr: &mut dyn Iterator<Item=&i32>) {
+    for n in itr {
+      let mut next = *n;
+      for v in self.values.iter_mut() {
+        let park = *v;
+        *v = next;
+        next -= park;
+      }
+      self.values.push(next);
+    }
+  }
+
+  fn next_value(&self) -> i32 {
+    self.values.iter().sum()
   }
 }
 
-pub fn part1(input: &[Vec<ValueType>]) -> ValueType {
-  input.iter().map(|v| find_next(v)).sum()
+fn compute(history_lines: &[Vec<i32>], reverse: bool) -> i64 {
+  history_lines.iter().map(|nums| {
+    let hl = if reverse {
+      HistoryLine::from_nums(&mut nums.iter().rev())
+    } else {
+      HistoryLine::from_nums(&mut nums.iter())
+    };
+    hl.next_value() as i64
+  })
+    .sum()
 }
 
-fn find_previous(series: &[ValueType]) -> ValueType {
-  if series.iter().all(| val| *val == 0) {
-    0
-  } else {
-    series.first().unwrap() - find_previous(&build_differences(series))
-  }
+pub fn part1(history_lines: &[Vec<i32>]) -> i64 {
+  compute(history_lines, false)
 }
 
-pub fn part2(input: &[Vec<ValueType>]) -> ValueType {
-  input.iter().map(|v| find_previous(v)).sum()
+pub fn part2(history_lines: &[Vec<i32>]) -> i64 {
+  compute(history_lines, true)
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day9::{generator, part1, part2};
+  use crate::day9::{generator, HistoryLine, part1, part2};
 
-  const INPUT: &str =
-"0 3 6 9 12 15
+  fn input() -> String {
+    "0 3 6 9 12 15
 1 3 6 10 15 21
-10 13 16 21 30 45
-";
+10 13 16 21 30 45".to_string()
+  }
+
+  #[test]
+  fn test_generator() {
+    let lines = generator(&input());
+    assert_eq!(3, lines.len());
+  }
+
+  #[test]
+  fn test_predict() {
+    let mut l = HistoryLine::_from("0 3", false);
+    assert_eq!(l.values, vec![3, 3]);
+    l.add(&6);
+    assert_eq!(l.values, vec![6, 3, 0]);
+    l.add(&9);
+    assert_eq!(l.values, vec![9, 3, 0, 0]);
+    assert_eq!(12, l.next_value());
+
+    let mut l = HistoryLine::_from("10 13", false);
+    assert_eq!(l.values, vec![13, 3]);
+    l.add(&16);
+    assert_eq!(l.values, vec![16, 3, 0]);
+    l.add(&21);
+    assert_eq!(l.values, vec![21, 5, 2, 2]);
+    l.add(&30);
+    assert_eq!(l.values, vec![30, 9, 4, 2, 0]);
+    l.add(&45);
+    assert_eq!(l.values, vec![45, 15, 6, 2, 0, 0]);
+    assert_eq!(l.next_value(), 68);
+
+    let l = HistoryLine::_from("10 13 16 21 30 45", false);
+    assert_eq!(l.next_value(), 68);
+  }
 
   #[test]
   fn test_part1() {
-    assert_eq!(114, part1(&generator(INPUT)));
+    let lines = generator(&input());
+    assert_eq!(114, part1(&lines));
+  }
+
+  #[test]
+  fn test_backwards() {
+    let l = HistoryLine::_from("10 13 16 21 30 45", true);
+    assert_eq!(l.next_value(), 5);
   }
 
   #[test]
   fn test_part2() {
-    assert_eq!(2, part2(&generator(INPUT)));
+    let lines = generator(&input());
+    assert_eq!(2, part2(&lines));
   }
 }
