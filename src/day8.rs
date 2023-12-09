@@ -172,16 +172,20 @@ fn find_congruence(iterators: &mut [GoalIterator]) -> usize {
   let mut current: Vec<usize> = (0..iterators.len())
       .map(|i| iterators[i].next().unwrap()).collect();
   // Keep iterating until all of the iterators are the same
-  let mut not_same = true;
+  let mut needs_checking = iterators.len() as i64;
   let mut current_max = current[0];
-  while not_same {
-    not_same = false;
+  while needs_checking > 0 {
     for (i, c_v) in current.iter_mut().enumerate() {
+      let changed = *c_v != current_max;
       while *c_v < current_max {
         *c_v = iterators[i].next().unwrap();
-        not_same = true;
       }
-      current_max = current_max.max(*c_v);
+      if changed {
+        needs_checking = iterators.len() as i64;
+        current_max = current_max.max(*c_v);
+      } else {
+        needs_checking -= 1;
+      }
     }
   }
   current[0]
