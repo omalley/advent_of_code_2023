@@ -22,20 +22,20 @@ impl HistoryLine {
 
   fn from_nums(nums: &mut dyn Iterator<Item=&i32>) -> HistoryLine {
     let mut hl = HistoryLine::default();
-    hl.add(nums);
+    for n in nums {
+      hl.add(*n);
+    }
     hl
   }
 
-  fn add(&mut self, itr: &mut dyn Iterator<Item=&i32>) {
-    for n in itr {
-      let mut next = *n;
-      for v in self.values.iter_mut() {
-        let park = *v;
-        *v = next;
-        next -= park;
-      }
-      self.values.push(next);
+  fn add(&mut self, n: i32) {
+    let mut next = n;
+    for v in self.values.iter_mut() {
+      let park = *v;
+      *v = next;
+      next -= park;
     }
+    self.values.push(next);
   }
 
   fn next_value(&self) -> i32 {
@@ -45,12 +45,9 @@ impl HistoryLine {
 
 fn compute(history_lines: &[Vec<i32>], reverse: bool) -> i64 {
   history_lines.iter().map(|nums| {
-    let hl = if reverse {
-      HistoryLine::from_nums(&mut nums.iter().rev())
-    } else {
-      HistoryLine::from_nums(&mut nums.iter())
-    };
-    hl.next_value() as i64
+    let mut nums_iter: Box<dyn Iterator<Item=&i32>> =
+        if reverse { Box::new(nums.iter().rev()) } else { Box::new(nums.iter()) };
+    HistoryLine::from_nums(&mut nums_iter).next_value() as i64
   })
     .sum()
 }
