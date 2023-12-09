@@ -1,10 +1,9 @@
-
 type ValueType = i64;
 
 fn read_numbers(s: &str) -> Result<Vec<ValueType>, String> {
-  Ok(s.split_whitespace()
+  s.split_whitespace()
       .map(|w| w.parse::<ValueType>().map_err(|_| format!("Can't parse number {w}")))
-      .collect::<Result<Vec<ValueType>, String>>()?)
+      .collect::<Result<Vec<ValueType>, String>>()
 }
 
 pub fn generator(input: &str) -> Vec<Vec<ValueType>> {
@@ -12,22 +11,33 @@ pub fn generator(input: &str) -> Vec<Vec<ValueType>> {
       .unwrap() // panics on error
 }
 
-fn process_series(series: &[ValueType]) -> ValueType {
+fn build_differences(series: &[ValueType]) -> Vec<ValueType> {
+  series[1..].iter().enumerate()
+      .map(|(i, val) | val - series[i]).collect::<Vec<ValueType>>()
+}
+
+fn find_next(series: &[ValueType]) -> ValueType {
   if series.iter().all(| val| *val == 0) {
     0
   } else {
-    let next = series[1..].iter().enumerate()
-        .map(|(i, val) | val - series[i]).collect::<Vec<ValueType>>();
-    process_series(&next) + series.last().unwrap()
+    find_next(&build_differences(series)) + series.last().unwrap()
   }
 }
 
 pub fn part1(input: &[Vec<ValueType>]) -> ValueType {
-  input.iter().map(|v| process_series(v)).sum()
+  input.iter().map(|v| find_next(v)).sum()
+}
+
+fn find_previous(series: &[ValueType]) -> ValueType {
+  if series.iter().all(| val| *val == 0) {
+    0
+  } else {
+    series.first().unwrap() - find_previous(&build_differences(series))
+  }
 }
 
 pub fn part2(input: &[Vec<ValueType>]) -> ValueType {
-  0
+  input.iter().map(|v| find_previous(v)).sum()
 }
 
 #[cfg(test)]
@@ -47,6 +57,6 @@ mod tests {
 
   #[test]
   fn test_part2() {
-    //assert_eq!(0, part2(&generator(INPUT)));
+    assert_eq!(2, part2(&generator(INPUT)));
   }
 }
