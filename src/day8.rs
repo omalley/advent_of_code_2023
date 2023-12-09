@@ -1,3 +1,4 @@
+use num_integer::Integer;
 use std::collections::HashMap;
 
 #[derive(Clone,Copy,Debug,Eq,PartialEq)]
@@ -24,6 +25,7 @@ pub struct Location {
   name: String,
   left: usize,
   right: usize,
+  ends_with_z: bool,
 }
 
 impl Location {
@@ -33,14 +35,14 @@ impl Location {
     let (left, right) = targets[1..targets.len() -1].split_once(", ")
         .ok_or("Can't split destinations in {s}")?;
     Ok(Location{name: name.to_string(), left: *location_map.get(left).unwrap(),
-      right: *location_map.get(right).unwrap()})
+      right: *location_map.get(right).unwrap(), ends_with_z: name.ends_with('Z')})
   }
 }
 
 #[derive(Clone,Debug)]
 pub struct Map {
-  start: usize,
-  goal: usize,
+  start: Option<usize>,
+  goal: Option<usize>,
   directions: Vec<Direction>,
   places: Vec<Location>,
 }
@@ -61,10 +63,8 @@ impl Map {
     let places = room_str.lines()
         .map(|l| Location::from_str(l, &location_map))
         .collect::<Result<Vec<Location>,String>>()?;
-    Ok(Map{start: *location_map.get(Self::START_LOCATION)
-             .ok_or(format!("Can't find {}", Self::START_LOCATION))?,
-           goal: *location_map.get(Self::GOAL_LOCATION)
-             .ok_or(format!("Can't find {}", Self::GOAL_LOCATION))?,
+    Ok(Map{start: location_map.get(Self::START_LOCATION).map(|l| *l),
+           goal: location_map.get(Self::GOAL_LOCATION).map(|l| *l),
            directions, places})
   }
 
@@ -81,11 +81,12 @@ pub fn generator(input: &str) -> Map {
   Map::from_str(input).unwrap() // panics on error
 }
 
-pub fn part1(input: &Map) -> u64 {
-  let mut location = input.start;
+pub fn part1(input: &Map) -> usize {
+  let mut location = input.start.unwrap();
+  let goal = input.goal.unwrap();
   let mut steps = 0;
   for dir in input.directions.iter().cloned().cycle() {
-    if location == input.goal {
+    if location == goal {
       break;
     }
     location = input.step(location, dir);
@@ -94,13 +95,112 @@ pub fn part1(input: &Map) -> u64 {
   steps
 }
 
-pub fn part2(input: &Map) -> u64 {
-  0
+#[derive(Debug)]
+struct CycleDescription {
+  goals: Vec<usize>,
+  start: usize,
+  length: usize,
+}
+
+impl CycleDescription {
+  fn from_map(input: &Map, start: usize) -> Self {
+    let mut visited: Vec<Vec<Option<usize>>>
+        = vec![vec![None; input.places.len()]; input.directions.len()];
+    let mut goals = Vec::new();
+    let mut current = start;
+    for (step, dir) in input.directions.iter().cloned().cycle().enumerate() {
+      let loc = &input.places[current];
+      if let Some(loop_start) = visited[step % input.directions.len()][current] {
+        return CycleDescription { goals, start: loop_start, length: step - loop_start }
+      }
+      if loc.ends_with_z {
+        goals.push(step);
+      }
+      visited[step % input.directions.len()][current] = Some(step);
+      current = input.step(current, dir);
+    }
+    panic!("Shouldn't end loop!");
+  }
+
+  fn is_simple_loop(&self) -> bool {
+    self.goals.len() == 1 && *self.goals.first().unwrap() == self.length
+  }
+
+  fn iter(&self) -> GoalIterator {
+    let mut pre_cycle_goals: Vec<usize> =
+        self.goals.iter().filter(|&g| *g < self.start).map(|x| *x).collect();
+    pre_cycle_goals.reverse();
+    let goals = self.goals.iter().filter(|&g| *g >= self.start)
+        .map(|x| *x).collect();
+    GoalIterator{pre_cycle_goals, goals, next_index: 0, cycle_length: self.length, offset: 0}
+  }
+}
+
+/// Define an infinite iterator that generates the times that we are at a goal spot.
+#[derive(Debug)]
+struct GoalIterator {
+  pre_cycle_goals: Vec<usize>,
+  goals: Vec<usize>,
+  next_index: usize, // the index of the next goal
+  cycle_length: usize, // the length of the cycle
+  offset: usize, // the offset from t = 0 depending on how many times we've gone around
+}
+
+impl Iterator for GoalIterator {
+  type Item = usize;
+
+  fn next(&mut self) -> Option<Self::Item> {
+    if let Some(early) = self.pre_cycle_goals.pop() {
+      return Some(early)
+    }
+    if self.next_index >= self.goals.len() {
+      self.next_index = 0;
+      self.offset += self.cycle_length;
+    }
+    let result = self.goals[self.next_index] + self.offset;
+    self.next_index += 1;
+    return Some(result)
+  }
+}
+
+fn find_congruence(iterators: &mut [GoalIterator]) -> usize {
+  // Get the first value from each iterator
+  let mut current: Vec<usize> = (0..iterators.len())
+      .map(|i| iterators[i].next().unwrap()).collect();
+  // Keep iterating until all of the iterators are the same
+  let mut not_same = true;
+  while not_same {
+    not_same = false;
+    // We know that the answer can't be less than the current max
+    let next_step = *current.iter().max().unwrap();
+    for i in 0..iterators.len() {
+      while current[i] < next_step {
+        not_same = true;
+        current[i] = iterators[i].next().unwrap();
+      }
+    }
+  }
+  current[0]
+}
+
+pub fn part2(input: &Map) -> usize {
+  let locations = input.places.iter().enumerate()
+      .filter_map( |(i, p) | if p.name.ends_with('A') { Some(i) } else { None })
+      .collect::<Vec<usize>>();
+  let cycles : Vec<CycleDescription> = locations.iter()
+      .map(|loc| CycleDescription::from_map(input, *loc)).collect();
+  if cycles.iter().all(|c| c.is_simple_loop()) {
+    cycles.iter().map(|c| c.length)
+        .fold(1_usize, |acc, c| acc.lcm(&c))
+  } else {
+    let mut iters: Vec<GoalIterator> = cycles.iter().map(|c| c.iter()).collect();
+    find_congruence(&mut iters)
+  }
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day8::{generator, part1, part2};
+  use crate::day8::{CycleDescription, generator, part1, part2};
 
   const INPUT: &str =
 "RL
@@ -118,8 +218,46 @@ ZZZ = (ZZZ, ZZZ)";
     assert_eq!(2, part1(&generator(INPUT)));
   }
 
+  const INPUT2: &str =
+"LR
+
+11A = (11B, XXX)
+11B = (XXX, 11Z)
+11Z = (11B, XXX)
+22A = (22B, XXX)
+22B = (22C, 22C)
+22C = (22Z, 22Z)
+22Z = (22B, 22B)
+XXX = (XXX, XXX)";
+
   #[test]
   fn test_part2() {
-    assert_eq!(0, part2(&generator(INPUT)));
+    assert_eq!(6, part2(&generator(INPUT2)));
+  }
+
+  const INPUT3: &str =
+    "LLLRR
+
+11A = (11Z, XXX)
+11Z = (11C, 11D)
+11C = (11Z, XXX)
+11D = (XXX, 12Z)
+12Z = (12B, 12C)
+12B = (12C, 12Z)
+12C = (12Z, 12B)
+XXX = (XXX, XXX)";
+
+  #[test]
+  fn test_iter() {
+    let input = generator(INPUT2);
+    let cycle = CycleDescription::from_map(&input, 0);
+    assert_eq!(vec![2, 4, 6, 8], cycle.iter().take(4).collect::<Vec<usize>>());
+    let cycle = CycleDescription::from_map(&input, 3);
+    assert_eq!(vec![3, 6, 9, 12], cycle.iter().take(4).collect::<Vec<usize>>());
+
+    let input = generator(INPUT3);
+    let cycle = CycleDescription::from_map(&input, 0);
+    assert_eq!(vec!{1, 3, 5, 8, 12, 14, 16, 20, 23, 27, 29, 31, 35, 38},
+               cycle.iter().take(14).collect::<Vec<usize>>());
   }
 }
