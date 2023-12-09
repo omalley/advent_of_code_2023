@@ -25,7 +25,7 @@ pub struct Location {
   name: String,
   left: usize,
   right: usize,
-  ends_with_z: bool,
+  ends_with_z: bool, // for part2, this location is a goal if the name ends with 'Z'
 }
 
 impl Location {
@@ -41,10 +41,10 @@ impl Location {
 
 #[derive(Clone,Debug)]
 pub struct Map {
-  start: Option<usize>,
-  goal: Option<usize>,
-  directions: Vec<Direction>,
-  places: Vec<Location>,
+  start: Option<usize>,       // location AAA if it exists
+  goal: Option<usize>,        // location ZZZ if it exists
+  directions: Vec<Direction>, // the list of directions that must be repeated
+  places: Vec<Location>,      // all of the places
 }
 
 impl Map {
@@ -63,13 +63,14 @@ impl Map {
     let places = room_str.lines()
         .map(|l| Location::from_str(l, &location_map))
         .collect::<Result<Vec<Location>,String>>()?;
-    Ok(Map{start: location_map.get(Self::START_LOCATION).map(|l| *l),
-           goal: location_map.get(Self::GOAL_LOCATION).map(|l| *l),
+    Ok(Map{start: location_map.get(Self::START_LOCATION).copied(),
+           goal: location_map.get(Self::GOAL_LOCATION).copied(),
            directions, places})
   }
 
-  fn step(&self, start: usize, direction: Direction) -> usize {
-    let loc = self.places.get(start).unwrap();
+  /// Take a single step from a given location in the given direction.
+  fn step(&self, current: usize, direction: Direction) -> usize {
+    let loc = &self.places[current];
     match direction {
       Direction::Left => loc.left,
       Direction::Right => loc.right,
@@ -84,22 +85,21 @@ pub fn generator(input: &str) -> Map {
 pub fn part1(input: &Map) -> usize {
   let mut location = input.start.unwrap();
   let goal = input.goal.unwrap();
-  let mut steps = 0;
-  for dir in input.directions.iter().cloned().cycle() {
+  for (steps, dir) in input.directions.iter().cloned().cycle().enumerate() {
     if location == goal {
-      break;
+      return steps;
     }
     location = input.step(location, dir);
-    steps += 1;
   }
-  steps
+  panic!("infinite iterator");
 }
 
+/// A description of a cycle in the map.
 #[derive(Debug)]
 struct CycleDescription {
-  goals: Vec<usize>,
-  start: usize,
-  length: usize,
+  goals: Vec<usize>, // what are all of the goals before the next cycle?
+  start: usize,      // when does the cycle start?
+  length: usize,     // how long is the cycle
 }
 
 impl CycleDescription {
@@ -122,16 +122,18 @@ impl CycleDescription {
     panic!("Shouldn't end loop!");
   }
 
+  /// Is this a simple loop where the loop has a single goal at the end of the loop?
   fn is_simple_loop(&self) -> bool {
     self.goals.len() == 1 && *self.goals.first().unwrap() == self.length
   }
 
+  /// Create an iterator to generate all of the times when we are at a goal.
   fn iter(&self) -> GoalIterator {
     let mut pre_cycle_goals: Vec<usize> =
-        self.goals.iter().filter(|&g| *g < self.start).map(|x| *x).collect();
+        self.goals.iter().filter(|&g| *g < self.start).copied().collect();
     pre_cycle_goals.reverse();
     let goals = self.goals.iter().filter(|&g| *g >= self.start)
-        .map(|x| *x).collect();
+        .copied().collect();
     GoalIterator{pre_cycle_goals, goals, next_index: 0, cycle_length: self.length, offset: 0}
   }
 }
@@ -159,10 +161,12 @@ impl Iterator for GoalIterator {
     }
     let result = self.goals[self.next_index] + self.offset;
     self.next_index += 1;
-    return Some(result)
+    Some(result)
   }
 }
 
+/// Find the first point where all of the iterators agree. Basically, we keep iterating
+/// the lower ones until they agree.
 fn find_congruence(iterators: &mut [GoalIterator]) -> usize {
   // Get the first value from each iterator
   let mut current: Vec<usize> = (0..iterators.len())
