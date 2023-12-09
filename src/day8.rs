@@ -152,8 +152,8 @@ impl Iterator for GoalIterator {
   type Item = usize;
 
   fn next(&mut self) -> Option<Self::Item> {
-    if let Some(early) = self.pre_cycle_goals.pop() {
-      return Some(early)
+    if !self.pre_cycle_goals.is_empty() {
+      return self.pre_cycle_goals.pop()
     }
     if self.next_index >= self.goals.len() {
       self.next_index = 0;
@@ -173,15 +173,15 @@ fn find_congruence(iterators: &mut [GoalIterator]) -> usize {
       .map(|i| iterators[i].next().unwrap()).collect();
   // Keep iterating until all of the iterators are the same
   let mut not_same = true;
+  let mut current_max = current[0];
   while not_same {
     not_same = false;
-    // We know that the answer can't be less than the current max
-    let next_step = *current.iter().max().unwrap();
-    for i in 0..iterators.len() {
-      while current[i] < next_step {
+    for (i, c_v) in current.iter_mut().enumerate() {
+      while *c_v < current_max {
+        *c_v = iterators[i].next().unwrap();
         not_same = true;
-        current[i] = iterators[i].next().unwrap();
       }
+      current_max = current_max.max(*c_v);
     }
   }
   current[0]
