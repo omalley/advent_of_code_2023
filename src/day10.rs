@@ -1,3 +1,5 @@
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
+
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub enum Direction {
   North, East, South, West,
@@ -174,7 +176,8 @@ impl Map {
 
   fn step(&self, walker: &mut Walker) {
     walker.location = walker.location.step(walker.facing);
-    walker.facing = self.get_contents(walker.location).unwrap().twist(walker.facing).unwrap();
+    walker.facing = self.get_contents(walker.location).unwrap().twist(walker.facing)
+        .unwrap_or(Direction::North);
   }
 }
 
@@ -191,6 +194,38 @@ pub fn part1(input: &Map) -> usize {
     distance += 1;
   }
   distance
+}
+
+/// The size of each box.
+const BOX_WIDTH: u32 = 11;
+const BOX_MIDDLE: u32 = BOX_WIDTH / 2;
+
+fn translate_coord(val: i64) -> f32 {
+  val as f32 * BOX_WIDTH as f32 + BOX_MIDDLE as f32
+}
+
+pub fn save_shape(input: &Map, filename: &str) {
+  let mut pixmap = Pixmap::new(input.size.x as u32 * BOX_WIDTH,
+                               input.size.y as u32 * BOX_WIDTH).unwrap();
+  let mut path_builder = PathBuilder::new();
+  let mut walkers = input.get_start_walkers();
+  path_builder.move_to(translate_coord(input.start.x), translate_coord(input.start.y));
+  loop {
+    input.step(&mut walkers[0]);
+    path_builder.line_to(translate_coord(walkers[0].location.x),
+                         translate_coord(walkers[0].location.y));
+    if walkers[0].location == input.start {
+      break
+    }
+  }
+  let path = path_builder.finish().unwrap();
+  let mut paint = Paint::default();
+  paint.set_color_rgba8( 13, 139, 40 , 255);
+  pixmap.fill_path(&path, &paint, FillRule::EvenOdd, Transform::default(), None);
+  paint.set_color_rgba8(255, 255, 255, 255);
+  let stroke = Stroke { width: 3.0, ..Default::default() };
+  pixmap.stroke_path(&path, &paint, &stroke, Transform::default(), None);
+  pixmap.save_png(filename).unwrap()
 }
 
 pub fn part2(input: &Map) -> usize {

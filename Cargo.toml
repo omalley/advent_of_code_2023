@@ -21,6 +21,7 @@ serde_yaml = "0.9"
 smallvec = "1.11"
 strum = "0.24"
 strum_macros = "0.24"
+tiny-skia = "0.11"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
