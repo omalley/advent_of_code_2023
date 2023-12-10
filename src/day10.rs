@@ -154,19 +154,19 @@ impl Map {
   fn get_start_walkers(&self) -> Vec<Walker> {
     let mut result = Vec::new();
     if self.get_contents(self.start.step(Direction::North))
-        .and_then(|cont| Some(cont.has_direction(Direction::South))) == Some(true) {
+        .map(|cont| cont.has_direction(Direction::South)) == Some(true) {
       result.push(Walker{location: self.start, facing: Direction::North});
     }
     if self.get_contents(self.start.step(Direction::East))
-        .and_then(|cont| Some(cont.has_direction(Direction::West))) == Some(true) {
+        .map(|cont| cont.has_direction(Direction::West)) == Some(true) {
       result.push(Walker{location: self.start, facing: Direction::East});
     }
     if self.get_contents(self.start.step(Direction::South))
-        .and_then(|cont| Some(cont.has_direction(Direction::North))) == Some(true) {
+        .map(|cont| cont.has_direction(Direction::North)) == Some(true) {
       result.push(Walker{location: self.start, facing: Direction::South})
     }
     if self.get_contents(self.start.step(Direction::West))
-        .and_then(|cont| Some(cont.has_direction(Direction::East))) == Some(true) {
+        .map(|cont| cont.has_direction(Direction::East)) == Some(true){
       result.push(Walker{location: self.start, facing: Direction::West})
     }
     result
@@ -194,7 +194,32 @@ pub fn part1(input: &Map) -> usize {
 }
 
 pub fn part2(input: &Map) -> usize {
-  0
+  let mut walkers = input.get_start_walkers();
+  let start_has_north = walkers.iter().any(|w| w.facing == Direction::North);
+  let mut pipe_loop =
+      vec![vec![false; input.size.x as usize]; input.size.y as usize];
+  pipe_loop[input.start.y as usize][input.start.x as usize] = true;
+  while walkers[0].location == input.start || walkers[0].location != walkers[1].location {
+    for w in walkers.iter_mut() {
+      input.step(w);
+      pipe_loop[w.location.y as usize][w.location.x as usize] = true;
+    }
+  }
+  let mut inside_count: usize = 0;
+  for (y, row) in input.grid.iter().enumerate() {
+    let mut wall_count = 0;
+    for (x, loc) in row.iter().enumerate() {
+      if pipe_loop[y][x] {
+        match loc {
+          PipeSection::Start => if start_has_north { wall_count += 1 },
+          other => if other.has_direction(Direction::North) { wall_count += 1},
+        }
+      } else if wall_count % 2 == 1 {
+        inside_count += 1;
+      }
+    }
+  }
+  inside_count
 }
 
 #[cfg(test)]
@@ -219,8 +244,45 @@ mod tests {
     assert_eq!(8, part1(&generator(INPUT2)));
   }
 
+  const INPUT3: &str =
+"...........
+.S-------7.
+.|F-----7|.
+.||.....||.
+.||.....||.
+.|L-7.F-J|.
+.|..|.|..|.
+.L--J.L--J.
+...........";
+
+  const INPUT4: &str =
+".F----7F7F7F7F-7....
+.|F--7||||||||FJ....
+.||.FJ||||||||L7....
+FJL7L7LJLJ||LJ.L-7..
+L--J.L7...LJS7F-7L7.
+....F-J..F7FJ|L7L7L7
+....L7.F7||L7|.L7L7|
+.....|FJLJ|FJ|F7|.LJ
+....FJL-7.||.||||...
+....L---J.LJ.LJLJ...";
+
+  const INPUT5: &str =
+"FF7FSF7F7F7F7F7F---7
+L|LJ||||||||||||F--J
+FL-7LJLJ||||||LJL-77
+F--JF--7||LJLJ7F7FJ-
+L---JF-JLJ.||-FJLJJ7
+|F|F-JF---7F7-L7L|7|
+|FFJF7L7F-JF7|JL---7
+7-L-JL7||F7|L7F-7F7|
+L.L7LFJ|||||FJL7||LJ
+L7JLJL-JLJLJL--JLJ.L";
+
   #[test]
   fn test_part2() {
-    assert_eq!(2, part2(&generator(INPUT)));
+    assert_eq!(4, part2(&generator(INPUT3)));
+    assert_eq!(8, part2(&generator(INPUT4)));
+    assert_eq!(10, part2(&generator(INPUT5)));
   }
 }
