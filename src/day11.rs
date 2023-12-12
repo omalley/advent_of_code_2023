@@ -25,9 +25,7 @@ impl Map {
     for (y, row) in input.lines().enumerate() {
       // Set the empty columns up to be the right length
       if y == 0 {
-        for _ in row.chars() {
-          empty_columns.push(true);
-        }
+        empty_columns = vec![true; row.len()];
       }
       let mut is_empty = true;
       for (x, ch) in row.chars().enumerate() {
