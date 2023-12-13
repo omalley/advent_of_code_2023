@@ -1,3 +1,4 @@
+use chrono::Local;
 use smallvec::SmallVec;
 
 #[derive(Clone,Debug,PartialEq)]
@@ -64,12 +65,16 @@ impl Record {
   fn unknown_run(springs: &[SpringState]) -> Option<usize> {
     for (i, s) in springs.iter().enumerate() {
       match s {
-        SpringState::Good => return Some(i),
+        SpringState::Good => return if i == 0 { None } else { Some(i) },
         SpringState::Broken => return None,
         _ => {},
       }
     }
-    Some(springs.len())
+    if springs.is_empty() {
+      None
+    } else {
+      Some(springs.len())
+    }
   }
 
   /// Count the number of combinations given a series of unknown locations.
@@ -97,10 +102,8 @@ impl Record {
   fn handle_unknown_run(&self, next: &PartialSolution, unknown_run: usize) -> Vec<PartialSolution> {
     let mut pending = Vec::new();
     let mut new_partial = next.clone();
-    new_partial.length += unknown_run as u16 + 1;
-    println!("input: {:?}", self);
-    println!("next: {:?}", next);
-    println!("run = {unknown_run}, new length = {}", new_partial.length);
+    new_partial.length = (new_partial.length as usize  + unknown_run + 1)
+        .min(self.springs.len()) as u16;
     pending.push(new_partial.clone());
     let start = next.runs_at.len();
     let mut current = start;
@@ -133,9 +136,9 @@ impl Record {
           solution_count += next.multiplier;
         }
       // handle the special case of a terminated series of unknowns
-      //} else if let Some(unknown_run) =
-      //    Self::unknown_run(&self.springs[next.length as usize..]) {
-      //  pending.append(&mut self.handle_unknown_run(&next, unknown_run));
+      } else if let Some(unknown_run) =
+          Self::unknown_run(&self.springs[next.length as usize..]) {
+        pending.append(&mut self.handle_unknown_run(&next, unknown_run));
       } else {
         let current = next.runs_at.len();
         let max_position = total_length
@@ -179,7 +182,11 @@ pub fn part1(input: &[Record]) -> usize {
 }
 
 pub fn part2(input: &[Record]) -> usize {
-  input.iter().map(|r| r.extend(5).count_matches()).sum()
+  input.iter().enumerate().map(|(i, r) | {
+    let time = Local::now();
+    println!("run {i} - {}", time.format("%d/%m/%Y %H:%M"));
+    r.extend(5).count_matches()
+  }).sum()
 }
 
 #[cfg(test)]
