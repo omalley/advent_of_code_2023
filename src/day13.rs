@@ -32,55 +32,64 @@ impl Map {
     Ok(Map{locations, width, height})
   }
 
-  fn vertical_reflection_at(&self, at: usize) -> bool {
+  fn rows_match(&self, y1: usize, y2: usize) -> usize {
+    let mut smudges = 0;
+    for x in 0..self.width {
+      if self.locations[y1][x] != self.locations[y2][x] {
+        smudges += 1;
+      }
+    }
+    smudges
+  }
+
+  fn vertical_reflection_at(&self, at: usize) -> usize {
     let mut lower = at;
     let mut upper = at + 1;
+    let mut smudges = 0;
     while upper < self.height {
-      if self.locations[lower] != self.locations[upper] {
-        return false;
-      }
+      smudges += self.rows_match(lower, upper);
       if lower == 0 {
         break;
       }
       lower -= 1;
       upper += 1;
     }
-    true
+    smudges
   }
 
-  fn columns_match(&self, x1: usize, x2: usize) -> bool {
+  fn columns_match(&self, x1: usize, x2: usize) -> usize {
+    let mut smudges = 0;
     for y in 0..self.height {
       if self.locations[y][x1] != self.locations[y][x2] {
-        return false;
+        smudges += 1;
       }
     }
-    true
+    smudges
   }
 
-  fn horizonal_reflection_at(&self, at: usize) -> bool {
+  fn horizonal_reflection_at(&self, at: usize) -> usize {
     let mut lower = at;
     let mut upper = at + 1;
+    let mut smudges = 0;
     while upper < self.width {
-      if !self.columns_match(lower, upper) {
-        return false;
-      }
+      smudges += self.columns_match(lower, upper);
       if lower == 0 {
         break;
       }
       lower -= 1;
       upper += 1;
     }
-    true
+    smudges
   }
 
-  fn find_reflection(&self) -> usize {
+  fn find_reflection(&self, smudges: usize) -> usize {
     for y in 0..self.height - 1 {
-      if self.vertical_reflection_at(y) {
+      if self.vertical_reflection_at(y) == smudges {
         return (y + 1) * 100
       }
     }
     for x in 0..self.width - 1 {
-      if self.horizonal_reflection_at(x) {
+      if self.horizonal_reflection_at(x) == smudges{
         return x + 1
       }
     }
@@ -94,11 +103,11 @@ pub fn generator(input: &str) -> Vec<Map> {
 }
 
 pub fn part1(input: &[Map]) -> usize {
-  input.iter().map(|m| m.find_reflection()).sum()
+  input.iter().map(|m| m.find_reflection(0)).sum()
 }
 
 pub fn part2(input: &[Map]) -> usize {
-  0
+  input.iter().map(|m| m.find_reflection(1)).sum()
 }
 
 #[cfg(test)]
@@ -129,6 +138,6 @@ mod tests {
 
   #[test]
   fn test_part2() {
-    //assert_eq!(525152, part2(&generator(INPUT)));
+    assert_eq!(400, part2(&generator(INPUT)));
   }
 }
