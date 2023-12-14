@@ -1,6 +1,3 @@
-use chrono::Local;
-use smallvec::SmallVec;
-
 #[derive(Clone,Debug,PartialEq)]
 pub enum SpringState {
   Good,
@@ -19,11 +16,51 @@ impl SpringState {
   }
 }
 
-#[derive(Clone,Debug,Default)]
+#[derive(Clone,Debug)]
 struct PartialSolution {
-  runs_at: SmallVec<[u16; 30]>,
-  length: u16,
+  finished: u32,
+  length: u32,
   multiplier: usize,
+}
+
+impl PartialSolution {
+  fn default() -> Self {
+    PartialSolution{finished:0, length:0, multiplier: 1}
+  }
+
+  /// Advance the solution over any known good springs.
+  fn skip_over_good(&mut self, springs: &[SpringState]) -> &mut Self {
+    while (self.length as usize) < springs.len() &&
+        springs[self.length as usize] == SpringState::Good {
+      self.length += 1;
+    }
+    self
+  }
+
+  /// Find the length of the next sequence of broken & unknown
+  /// springs.
+  /// Returns the length of the range and whether it is the end.
+  fn find_next_range(&self, springs: &[SpringState]) -> Option<(usize, bool)> {
+    for (i, spring) in springs[self.length as usize..]
+        .iter().enumerate() {
+      if *spring == SpringState::Good {
+        return if i == 0 { None } else { Some((i, false)) };
+      }
+    }
+    if springs.len() == self.length as usize { None } else {
+      Some (( springs.len() - self.length as usize, true))}
+  }
+
+  fn extend(&mut self, springs: usize, runs: usize) -> &mut Self {
+    self.finished += runs as u32;
+    self.length += springs as u32;
+    self
+  }
+
+  fn multiply(&mut self, multiplier: usize) -> &mut Self {
+    self.multiplier *= multiplier;
+    self
+  }
 }
 
 #[derive(Clone,Debug)]
@@ -48,115 +85,132 @@ impl Record {
     springs.iter().all(|s| *s != SpringState::Broken)
   }
 
-  fn is_broken(springs: &[SpringState]) -> bool {
-    springs.iter().all(|s| *s != SpringState::Good)
+  fn is_all_unknown(springs: &[SpringState]) -> bool {
+    springs.iter().all(|s| *s == SpringState::Unknown)
   }
 
-  /// Checks to make sure the position can end a broken run.
-  /// It must either be non-broken or at the end of the Vec.
-  fn ends_run(springs: &[SpringState], position: usize) -> bool {
-    springs.get(position).map(|p| *p != SpringState::Broken)
-        .unwrap_or(true)
-  }
-
-  /// Determine if there is a run of unknowns that is terminated with a good or
-  /// the end of the sequence. We are looking for unknown substrings that will
-  /// contain disjoint runs of broken springs.
-  fn unknown_run(springs: &[SpringState]) -> Option<usize> {
-    for (i, s) in springs.iter().enumerate() {
-      match s {
-        SpringState::Good => return if i == 0 { None } else { Some(i) },
-        SpringState::Broken => return None,
-        _ => {},
-      }
+  fn indent(x: usize) -> String {
+    let mut result = String::new();
+    for _ in 0..x {
+      result += "  ";
     }
-    if springs.is_empty() {
-      None
-    } else {
-      Some(springs.len())
-    }
+    result
   }
 
   /// Count the number of combinations given a series of unknown locations.
-  fn count_unknown_run(spring_len: usize, broken_runs: &[usize]) -> usize {
-    match broken_runs.len() {
-      0 => 0,
-      1 => spring_len - broken_runs[0] + 1,
-      2 => {
-        let n = spring_len - broken_runs.iter().sum::<usize>();
-        n * (n + 1) / 2
-      },
-      _ => {
-        let tail_length = broken_runs[1..].iter().sum::<usize>() + broken_runs.len() - 2;
-        let head_length = broken_runs[0] + 1;
-        let mut result = 0;
-        for offset in 0..=spring_len-tail_length-head_length {
-          result += Self::count_unknown_run(spring_len - offset - head_length,
-                                            &broken_runs[1..]);
+  fn count_unknown_range(spring_len: usize, broken_runs: &[usize], indent: usize) -> usize {
+    //println!("{}count_unknown_range springs = {spring_len} broken runs: {:?}", Self::indent(indent), broken_runs);
+    let broken_len = broken_runs.iter().sum::<usize>() + broken_runs.len() - 1;
+    if broken_len > spring_len {
+      0
+    } else {
+      match broken_runs.len() {
+        0 => 0,
+        1 => spring_len - broken_runs[0] + 1,
+        2 => {
+          let n = spring_len - broken_len + 1;
+          n * (n + 1) / 2
+        },
+        _ => {
+          let tail_length = broken_runs[1..].iter().sum::<usize>() + broken_runs.len() - 2;
+          let head_length = broken_runs[0] + 1;
+          let mut result = 0;
+          for offset in 0..=spring_len-tail_length-head_length {
+            result += Self::count_unknown_range(spring_len - offset - head_length,
+                                                &broken_runs[1..], indent + 1);
+          }
+          //println!("{}count_unknown_ranges = {result}", Self::indent(indent));
+          result
         }
-        result
       }
     }
   }
 
-  fn handle_unknown_run(&self, next: &PartialSolution, unknown_run: usize) -> Vec<PartialSolution> {
-    let mut pending = Vec::new();
-    let mut new_partial = next.clone();
-    new_partial.length = (new_partial.length as usize  + unknown_run + 1)
-        .min(self.springs.len()) as u16;
-    pending.push(new_partial.clone());
-    let start = next.runs_at.len();
-    let mut current = start;
-    let mut min_size = self.broken_counts[start];
-    while min_size <= unknown_run {
-      new_partial.multiplier = next.multiplier *
-          Self::count_unknown_run(unknown_run, &self.broken_counts[start..=current]);
-      new_partial.runs_at = next.runs_at.clone();
-      new_partial.runs_at.extend_from_slice(&vec![next.length; current - start + 1]);
-      pending.push(new_partial.clone());
-      current += 1;
-      if current == self.broken_counts.len() {
-        break;
+  /// Count the combinations given a series of springs (only broken and unknown) and
+  /// a set of runs to match. All of the springs and broken_counts must be accounted
+  /// for.
+  fn count_mixed_range(springs: &[SpringState], broken_counts: &[usize], indent: usize) -> usize {
+    //println!("{}count_mixed_range: {:?}, broken: {:?}", Self::indent(indent), springs, broken_counts);
+    if springs.is_empty() || broken_counts.is_empty() {
+      0
+    } else if Self::is_all_unknown(springs) {
+      let result = Self::count_unknown_range(springs.len(), broken_counts, indent+1);
+      //println!("{}count_mixed_range return {result}", Self::indent(indent));
+      result
+    } else {
+      let mut result = 0;
+      let min_length = broken_counts.iter().sum::<usize>() + (broken_counts.len() - 1);
+      if min_length <= springs.len() {
+        let length = broken_counts[0];
+        for posn in 0..=springs.len() - min_length {
+          if broken_counts.len() == 1 {
+            if Self::is_all_unknown(&springs[posn + length..]) {
+              result += 1;
+            }
+          } else if springs[posn + length] == SpringState::Unknown {
+            result += Self::count_mixed_range(&springs[posn + length + 1..],
+                                              &broken_counts[1..], indent+1);
+          }
+          // If the current spring is broken, this is the last position we can start at.
+          if springs[posn] == SpringState::Broken {
+            break
+          }
+        }
       }
-      min_size += 1 + self.broken_counts[current];
+      //println!("{}count_mixed_range return {result}", Self::indent(indent));
+      result
     }
-    pending
   }
 
   fn count_matches(&self) -> usize {
-    let total_length = self.springs.len();
+    //println!("checking: {:?}", self);
     let mut pending: Vec<PartialSolution> = Vec::new();
-    pending.push(PartialSolution{multiplier: 1,.. PartialSolution::default()});
+    pending.push(PartialSolution::default().skip_over_good(&self.springs).clone());
     let mut solution_count = 0;
     while let Some(next) = pending.pop() {
+      //println!("popping {:?}", next);
       // Have we placed all of the broken runs?
-      if next.runs_at.len() == self.broken_counts.len() {
+      if next.finished as usize == self.broken_counts.len() {
         // We are successful if there aren't any remaining broken springs.
         if Self::is_not_broken(&self.springs[next.length as usize ..]) {
           solution_count += next.multiplier;
+          //println!("done adding {} to {solution_count}", next.multiplier);
         }
-      // handle the special case of a terminated series of unknowns
-      } else if let Some(unknown_run) =
-          Self::unknown_run(&self.springs[next.length as usize..]) {
-        pending.append(&mut self.handle_unknown_run(&next, unknown_run));
-      } else {
-        let current = next.runs_at.len();
-        let max_position = total_length
-            - self.broken_counts[current..].iter().sum::<usize>()
-            - (self.broken_counts.len() - current - 1);
-        for posn in next.length as usize..=max_position {
-          let end_posn = posn + self.broken_counts[current];
-          if Self::is_not_broken(&self.springs[next.length as usize..posn]) &&
-              Self::is_broken(&self.springs[posn..end_posn]) &&
-              Self::ends_run(&self.springs, end_posn) {
-            let mut next_state = next.clone();
-            next_state.runs_at.push(posn as u16);
-            next_state.length = (end_posn + 1).min(total_length) as u16;
-            pending.push(next_state);
+      } else if let Some((range, is_end)) = next.find_next_range(&self.springs) {
+        //println!("new range = {range}, is end = {is_end}");
+        let current = next.finished as usize;
+        if is_end {
+          // If this is the final range, it has to match the rest of the runs.
+          solution_count += next.multiplier * Self::count_mixed_range(
+            &self.springs[next.length as usize..], &self.broken_counts[current..], 1);
+        } else {
+          // try out not putting any runs here
+          if Self::is_all_unknown(&self.springs[next.length as usize..next.length as usize+range]) {
+            pending.push(next.clone().extend(range, 0).skip_over_good(&self.springs).clone());
+          }
+          let mut required_space = 0;
+          for included_run in current..self.broken_counts.len() {
+            required_space += self.broken_counts[included_run];
+            // include the extra good space
+            if included_run > current {
+              required_space += 1;
+            }
+            // If we don't fit in the range, we can stop trying to add more runs.
+            if required_space > range {
+              break;
+            }
+            let combinations = Self::count_mixed_range(
+              &self.springs[next.length as usize..next.length as usize + range],
+              &self.broken_counts[current..=included_run],1);
+            if combinations != 0 {
+              pending.push(next.clone().extend(range, included_run - current + 1)
+                  .multiply(combinations).skip_over_good(&self.springs).clone());
+            }
           }
         }
       }
     }
+    //println!("return = {solution_count}");
     solution_count
   }
 
@@ -182,16 +236,14 @@ pub fn part1(input: &[Record]) -> usize {
 }
 
 pub fn part2(input: &[Record]) -> usize {
-  input.iter().enumerate().map(|(i, r) | {
-    let time = Local::now();
-    println!("run {i} - {}", time.format("%d/%m/%Y %H:%M"));
-    r.extend(5).count_matches()
-  }).sum()
+  input.iter()
+      .map(|r | r.extend(5).count_matches())
+      .sum()
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day12::{generator, part1, part2, Record};
+  use crate::day12::{generator, part1, part2};
 
   const INPUT: &str =
 "???.### 1,1,3
@@ -204,6 +256,7 @@ mod tests {
   #[test]
   fn test_part1() {
     assert_eq!(21, part1(&generator(INPUT)));
+    assert_eq!(15, part1(&generator("?#?????.??????. 4,1")));
   }
 
   #[test]
@@ -217,13 +270,5 @@ mod tests {
     assert_eq!(36, part1(&generator("??????????????? 3,4")));
     assert_eq!(84, part1(&generator("???????????????????? 3,4,5")));
     assert_eq!(35, part1(&generator("???????????????????? 3,4,5,2")));
-  }
-
-  #[test]
-  fn test_count_unknown() {
-    assert_eq!(2, Record::count_unknown_run(5, &vec![4]));
-    assert_eq!(36, Record::count_unknown_run(15, &vec![3, 4]));
-    assert_eq!(84, Record::count_unknown_run(20, &vec![3, 4, 5]));
-    assert_eq!(35, Record::count_unknown_run(20, &vec![3, 4, 5, 2]));
   }
 }
