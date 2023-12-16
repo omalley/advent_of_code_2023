@@ -46,8 +46,8 @@ impl Map {
     }
   }
 
-  fn energize(&self) -> usize {
-    let mut pending = vec![Light::default()];
+  fn energize(&self, initial: &Light) -> usize {
+    let mut pending = vec![initial.clone()];
     let mut energized = EnergizedMap::new(self.width, self.height);
     while let Some(prev) = pending.pop() {
       // Are we still on the map?
@@ -102,6 +102,7 @@ impl EnergizedMap {
     result
   }
 
+  #[allow(dead_code)]
   fn print(&self) {
     for row in &self.energized {
       for spot in row {
@@ -188,11 +189,24 @@ impl Light {
 }
 
 pub fn part1(input: &Map) -> usize {
-  input.energize()
+  input.energize(&Light::default())
 }
 
 pub fn part2(input: &Map) -> usize {
-  0
+  let mut result = 0;
+  for x in 0..input.width as i32 {
+    result = result.max(input.energize(
+      &Light{facing: Direction::South, x, y: 0}));
+    result = result.max(input.energize(
+      &Light{facing: Direction::North, x, y: input.height as i32 - 1}));
+  }
+  for y in 0..input.height as i32 {
+    result = result.max(input.energize(
+      &Light{facing: Direction::East, y, x: 0}));
+    result = result.max(input.energize(
+      &Light{facing: Direction::West, y, x: input.width as i32 - 1}));
+  }
+  result
 }
 
 #[cfg(test)]
@@ -218,6 +232,6 @@ mod tests {
 
   #[test]
   fn test_part2() {
-    //assert_eq!(145, part2(&generator(INPUT)));
+    assert_eq!(51, part2(&generator(INPUT)));
   }
 }
