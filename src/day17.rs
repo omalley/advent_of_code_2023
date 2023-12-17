@@ -44,7 +44,7 @@ impl Map {
     pending.push(Position{facing: Direction::Start, straight: MIN_TURNS,
       x: start.0, y: start.1}, Reverse(0));
     while let Some((position, Reverse(heat))) = pending.pop() {
-      if position.x == finish.0 && position.y == finish.1 {
+      if position.straight >= MIN_TURNS && position.x == finish.0 && position.y == finish.1 {
         return heat
       }
       for next in position.next() {
@@ -120,7 +120,7 @@ impl<const MIN: Turns, const MAX: Turns> Position<MIN, MAX> {
 }
 
 pub fn part1(input: &Map) -> HeatValue {
-  input.find_minimum::<0,3>((0, 0), (input.width - 1, input.height - 1))
+  input.find_minimum::<1,3>((0, 0), (input.width - 1, input.height - 1))
 }
 
 pub fn part2(input: &Map) -> HeatValue {
