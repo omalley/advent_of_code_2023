@@ -6,6 +6,8 @@ use smallvec::SmallVec;
 type HeatValue = u32;
 type Coordinate = i16;
 
+type Turns = u8;
+
 #[derive(Clone,Debug)]
 pub struct Map {
   grid: Vec<Vec<HeatValue>>,
@@ -33,12 +35,14 @@ impl Map {
     }
   }
 
-  fn find_minimum(&self, start: (Coordinate, Coordinate),
+  fn find_minimum<const MIN_TURNS: Turns, const MAX_TURNS: Turns>
+                 (&self, start: (Coordinate, Coordinate),
                   finish: (Coordinate, Coordinate)) -> HeatValue {
-    let mut done : HashSet<Position> = HashSet::new();
-    let mut pending: PriorityQueue<Position,Reverse<HeatValue>> = PriorityQueue::new();
-    pending.push(Position{facing: Direction::Start, straight: 0, x: start.0, y: start.1},
-                 Reverse(0));
+    let mut done : HashSet<Position<MIN_TURNS,MAX_TURNS>> = HashSet::new();
+    let mut pending: PriorityQueue<Position<MIN_TURNS,MAX_TURNS>, Reverse<HeatValue>> =
+        PriorityQueue::new();
+    pending.push(Position{facing: Direction::Start, straight: MIN_TURNS,
+      x: start.0, y: start.1}, Reverse(0));
     while let Some((position, Reverse(heat))) = pending.pop() {
       if position.x == finish.0 && position.y == finish.1 {
         return heat
@@ -70,16 +74,14 @@ enum Direction {
 }
 
 #[derive(Clone,Debug,Eq,Hash,PartialEq)]
-struct Position {
+struct Position<const MIN: Turns, const MAX: Turns> {
   facing: Direction,
-  straight: u8,
+  straight: Turns,
   x: Coordinate,
   y: Coordinate,
 }
 
-impl Position {
-  const MAX_STRAIGHT: u8 = 3;
-
+impl<const MIN: Turns, const MAX: Turns> Position<MIN, MAX> {
   fn step(&self, facing: Direction) -> Option<Self> {
     let mut work = self.clone();
     match facing {
@@ -91,10 +93,13 @@ impl Position {
     }
     if work.facing == facing {
       work.straight += 1;
-      if work.straight > Self::MAX_STRAIGHT {
+      if work.straight > MAX {
         return None
       }
     } else {
+      if work.straight < MIN {
+        return None
+      }
       work.facing = facing;
       work.straight = 1;
     }
@@ -115,11 +120,11 @@ impl Position {
 }
 
 pub fn part1(input: &Map) -> HeatValue {
-  input.find_minimum((0, 0), (input.width - 1, input.height - 1))
+  input.find_minimum::<0,3>((0, 0), (input.width - 1, input.height - 1))
 }
 
 pub fn part2(input: &Map) -> HeatValue {
-  0
+  input.find_minimum::<4,10>((0, 0), (input.width - 1, input.height - 1))
 }
 
 #[cfg(test)]
@@ -148,6 +153,6 @@ mod tests {
 
   #[test]
   fn test_part2() {
-    assert_eq!(0, part2(&generator(INPUT)));
+    assert_eq!(94, part2(&generator(INPUT)));
   }
 }
