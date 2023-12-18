@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::Range;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Stroke, Transform};
 
@@ -20,6 +21,19 @@ impl Direction {
       "D" => Ok(Direction::Down),
       "U" => Ok(Direction::Up),
       _ => Err(format!("Unknown direction - {s}")),
+    }
+  }
+
+  /// The number to separate out the direction from distance in the color.
+  const COLOR_DIVISOR: Color = 16;
+
+  fn from_color(c: Color) -> Result<Self,String> {
+    match c % Self::COLOR_DIVISOR {
+      0 => Ok(Direction::Right),
+      1 => Ok(Direction::Down),
+      2 => Ok(Direction::Left),
+      3 => Ok(Direction::Up),
+      _ => Err(format!("Unknown direction {} from {c}", c % Self::COLOR_DIVISOR)),
     }
   }
 }
@@ -45,7 +59,6 @@ impl Position {
 pub struct Edge {
   start: Position,
   direction: Direction,
-  distance: Coordinate,
   end: Position,
   color: Color,
 }
@@ -60,12 +73,109 @@ impl Edge {
         .parse::<Coordinate>().map_err(|_| format!("Can't parse distance in {line}"))?;
     let mut color = words.next().ok_or(format!("Can't find color in {line}"))?;
     color = color.strip_prefix("(#").ok_or("can't remove color prefix".to_string())?;
-    color = color.strip_suffix(")").ok_or("can't remove color suffix".to_string())?;
+    color = color.strip_suffix(')').ok_or("can't remove color suffix".to_string())?;
     let color = Color::from_str_radix(color, 16)
         .map_err(|_| format!("Can't parse color - {color}"))?;
     let mut end = start.clone();
     end.move_to(direction, distance);
-    Ok(Edge{start: start.clone(), direction, distance, end, color})
+    Ok(Edge{start: start.clone(), direction, end, color})
+  }
+
+  fn from_color(color: Color, start: &Position) -> Result<Self,String> {
+    let direction = Direction::from_color(color)?;
+    let mut end = start.clone();
+    let distance = (color / Direction::COLOR_DIVISOR) as Coordinate;
+    end.move_to(direction, distance);
+    Ok(Edge{start: start.clone(), direction, end, color: 0})
+  }
+}
+
+#[derive(Clone,Debug,Eq,PartialEq)]
+struct EdgeBox {
+  y: Range<Coordinate>,
+  x: Range<Coordinate>,
+  is_vertical: bool,
+}
+
+impl EdgeBox {
+  fn x_cmp(&self, other: &Self) -> Ordering {
+    match self.x.start.cmp(&other.x.start) {
+      Ordering::Equal => self.x.end.cmp(&other.x.end),
+      result => result,
+    }
+  }
+}
+
+impl Ord for EdgeBox {
+  fn cmp(&self, other: &Self) -> Ordering {
+    match self.y.start.cmp(&other.y.start) {
+      Ordering::Equal => {
+        match self.x.start.cmp(&other.x.start) {
+          Ordering::Equal => match self.y.end.cmp(&other.y.end) {
+            Ordering::Equal => self.x.end.cmp(&other.x.end),
+            result => result,
+          }
+          result => result,
+        }
+      }
+      result => result,
+    }
+  }
+}
+
+impl PartialOrd for EdgeBox {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    Some(self.cmp(other))
+  }
+}
+
+#[derive(Clone,Debug)]
+struct EdgeMap {
+  edges: Vec<EdgeBox>,
+  width: Range<Coordinate>,
+  height: Range<Coordinate>,
+}
+
+impl EdgeMap {
+  fn compute_volume(&self) -> u64 {
+    let mut y = self.height.start;
+    let mut active: Vec<EdgeBox> = Vec::new();
+    let mut next = 0;
+    let mut count: u64 = 0;
+    while y < self.height.end {
+      // update the active edges for the new row
+      active.retain(|l| l.y.contains(&y));
+      while next < self.edges.len() && self.edges[next].y.contains(&y) {
+        active.push(self.edges[next].clone());
+        next += 1;
+      }
+      active.sort_unstable_by(|a,b| a.x_cmp(b));
+      let mut wall_count = 0;
+      let mut in_row_count = 0;
+      let mut x = self.width.start;
+      for edge in &active {
+        if x < edge.x.start {
+          if wall_count % 2 == 1 {
+            in_row_count +=  edge.x.start - x;
+          }
+          x = edge.x.start;
+        }
+        if x < edge.x.end {
+          in_row_count += edge.x.end - x;
+          x = edge.x.end;
+        }
+        if edge.is_vertical {
+          wall_count += 1;
+        }
+      }
+      let next_edge = self.edges.get(next).map(|e| e.y.start)
+          .unwrap_or(y+1);
+      let duplicate_rows = active.iter()
+          .map(|e| e.y.end).min().unwrap_or(y + 1).min(next_edge) - y;
+      count += duplicate_rows as u64 * in_row_count as u64;
+      y += duplicate_rows;
+    }
+    count
   }
 }
 
@@ -97,56 +207,66 @@ impl Map {
     Ok(Map{edges, width: left..right+1, height: top..bottom+1})
   }
 
-  fn set_line(&self, grid: &mut Vec<Vec<Spot>>, start: &Position,
-              end: &Position, direction: Direction, spot: Spot) {
-    let mut posn = start.clone();
-    grid[(posn.y - self.height.start) as usize][(posn.x - self.width.start) as usize] = spot;
-    while posn != *end {
-      posn.move_to(direction, 1);
-      grid[(posn.y - self.height.start) as usize][(posn.x - self.width.start) as usize] = spot;
+  /// Build a map of the edges of the ditches, where each edge is modelled as a bounding
+  /// box. Vertical edges do not include the southern end point so that our vertical
+  /// wall counting is easier.
+  fn build_edge_map(&self) -> EdgeMap {
+    let mut edges = Vec::new();
+    for e in &self.edges {
+      match e.direction {
+        Direction::Up =>
+          // The verticals walls explicitly don't cover the last square, so that
+          // we can count them well.
+          edges.push(EdgeBox{x: e.start.x..e.start.x+1,
+            y: e.end.y..e.start.y, is_vertical: true}),
+        Direction::Down =>
+          edges.push(EdgeBox{x: e.start.x..e.start.x+1,
+            y: e.start.y..e.end.y, is_vertical: true}),
+        Direction::Right =>
+          edges.push(EdgeBox{y: e.start.y..e.start.y+1,
+            x: e.start.x..e.end.x+1, is_vertical: false}),
+        Direction::Left =>
+          edges.push(EdgeBox{y: e.start.y..e.start.y+1,
+            x: e.end.x..e.start.x+1, is_vertical: false}),
+      }
     }
+    edges.sort_unstable();
+    EdgeMap{edges, width: self.width.clone(), height: self.height.clone()}
   }
 
-  pub fn find_inside(&self) -> (Vec<Vec<Spot>>, usize) {
-    let mut result =
-        vec![vec![Spot::Outside; self.width.len()]; self.height.len()];
-    for edge in &self.edges {
-      match edge.direction {
-        Direction::Up => {
-          self.set_line(&mut result, &edge.start, &edge.end, edge.direction, Spot::Vertical);
-          self.set_line(&mut result, &edge.end, &edge.end, edge.direction, Spot::Wall);
-        }
-        Direction::Down => {
-          self.set_line(&mut result, &edge.start, &edge.end, edge.direction, Spot::Vertical);
-          self.set_line(&mut result, &edge.start, &edge.start, edge.direction, Spot::Wall);
-        }
-        _ => if edge.distance > 1 {
-          let mut start = edge.start.clone();
-          start.move_to(edge.direction, 1);
-          let mut end = edge.end.clone();
-          end.move_to(edge.direction, -1);
-          self.set_line(&mut result, &start, &end, edge.direction, Spot::Wall)
-        },
+  /// Reinterpret the colors on the edges as the instructions to follow.
+  fn reinterpret_colors(&self) -> Result<Self, String> {
+    let mut current = Position::default();
+    let mut left = 0;
+    let mut right = 1;
+    let mut top = 0;
+    let mut bottom = 1;
+    let edges = self.edges.iter().map(|original_edge| {
+      let e = Edge::from_color(original_edge.color, &current);
+      if let Ok(edge) = &e {
+        left = left.min(edge.end.x);
+        right = right.max(edge.end.x + 1);
+        top = top.min(edge.end.y);
+        bottom = bottom.max(edge.end.y + 1);
+        current = edge.end.clone();
       }
-    }
-    let mut count = 0;
-    for row in result.iter_mut() {
-      let mut wall_count = 0;
-      for spot in row.iter_mut() {
-        match spot {
-          Spot::Vertical => {wall_count += 1; count += 1},
-          Spot::Outside => if wall_count % 2 == 1 { *spot = Spot::Inside; count += 1 },
-          Spot::Wall => count += 1,
-          _ => {},
-        }
-      }
-    }
-    (result, count)
+      e
+    }).collect::<Result<Vec<Edge>,String>>()?;
+    Ok(Map{edges, width: left..right+1, height: top..bottom+1})
   }
 }
 
 pub fn generator(input: &str) -> Map {
   Map::from_str(input).unwrap()
+}
+
+pub fn part1(input: &Map) -> u64 {
+  //save_shape(input, "day18.png");
+  input.build_edge_map().compute_volume()
+}
+
+pub fn part2(input: &Map) -> u64 {
+  input.reinterpret_colors().unwrap().build_edge_map().compute_volume()
 }
 
 const BOX_WIDTH: u32 = 11;
@@ -155,7 +275,7 @@ fn translate_coord(val: Coordinate) -> f32 {
   val as f32 * BOX_WIDTH as f32 + (BOX_WIDTH / 2) as f32
 }
 
-pub fn save_shape(input: &Map, filename: &str) {
+pub fn save_picture(input: &Map, filename: &str) {
   let mut pixmap = Pixmap::new(input.width.len() as u32 * BOX_WIDTH,
                                input.height.len() as u32 * BOX_WIDTH).unwrap();
   let mut path_builder = PathBuilder::new();
@@ -174,24 +294,6 @@ pub fn save_shape(input: &Map, filename: &str) {
   let stroke = Stroke { width: 3.0, ..Default::default() };
   pixmap.stroke_path(&path, &paint, &stroke, Transform::default(), None);
   pixmap.save_png(filename).unwrap()
-}
-
-#[derive(Clone,Copy,Debug)]
-pub enum Spot {
-  Outside,
-  Wall,
-  Vertical,
-  Inside,
-}
-
-pub fn part1(input: &Map) -> usize {
-  //save_shape(input, "day18.png");
-  let (_grid, count) = input.find_inside();
-  count
-}
-
-pub fn part2(input: &Map) -> usize {
-  0
 }
 
 #[cfg(test)]
