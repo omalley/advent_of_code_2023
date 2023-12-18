@@ -33,9 +33,9 @@ impl Map {
   }
 
   fn match_rows(&self, y1: usize, y2: usize, get: impl Fn(usize, usize) -> Location,
-                width: impl Fn() -> usize) -> usize {
+                width: usize) -> usize {
     let mut smudges = 0;
-    for x in 0..width() {
+    for x in 0..width {
       if get(x, y1) != get(x, y2) {
         smudges += 1;
       }
@@ -44,12 +44,12 @@ impl Map {
   }
 
   fn reflection_at(&self, y: usize, smudges: usize, get: impl Fn(usize, usize) -> Location,
-                   height: impl Fn() -> usize, width: impl Fn() -> usize) -> bool {
+                   height: usize, width:  usize) -> bool {
     let mut lower = y;
     let mut upper = y + 1;
     let mut smudge_count = 0;
-    while upper < height() {
-      smudge_count += self.match_rows(lower, upper, &get, &width);
+    while upper < height {
+      smudge_count += self.match_rows(lower, upper, &get, width);
       if lower == 0 || smudge_count > smudges {
         break;
       }
@@ -60,9 +60,9 @@ impl Map {
   }
 
   fn locate_reflection(&self, smudges: usize, get: impl Fn(usize, usize) -> Location,
-                       height: impl Fn() -> usize, width: impl Fn() -> usize) -> Option<usize> {
-    for y in 0..height() - 1 {
-      if self.reflection_at(y, smudges, &get, &height, &width) {
+                       height: usize, width: usize) -> Option<usize> {
+    for y in 0..height - 1 {
+      if self.reflection_at(y, smudges, &get, height, width) {
         return Some(y + 1);
       }
     }
@@ -72,12 +72,12 @@ impl Map {
   fn find_reflection(&self, smudges: usize) -> usize {
     if let Some(ans) = self.locate_reflection(smudges,
                                               |x, y| self.locations[y][x],
-                                               || self.height, || self.width) {
+                                               self.height, self.width) {
       return ans * 100
     }
     if let Some(ans) = self.locate_reflection(smudges,
                                               |x, y| self.locations[x][y],
-                                              || self.width, || self.height) {
+                                              self.width, self.height) {
       return ans
     }
     0
