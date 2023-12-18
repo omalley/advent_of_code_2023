@@ -32,66 +32,53 @@ impl Map {
     Ok(Map{locations, width, height})
   }
 
-  fn rows_match(&self, y1: usize, y2: usize) -> usize {
+  fn match_rows(&self, y1: usize, y2: usize, get: impl Fn(usize, usize) -> Location,
+                width: impl Fn() -> usize) -> usize {
     let mut smudges = 0;
-    for x in 0..self.width {
-      if self.locations[y1][x] != self.locations[y2][x] {
+    for x in 0..width() {
+      if get(x, y1) != get(x, y2) {
         smudges += 1;
       }
     }
     smudges
   }
 
-  fn vertical_reflection_at(&self, at: usize) -> usize {
-    let mut lower = at;
-    let mut upper = at + 1;
-    let mut smudges = 0;
-    while upper < self.height {
-      smudges += self.rows_match(lower, upper);
-      if lower == 0 {
+  fn reflection_at(&self, y: usize, smudges: usize, get: impl Fn(usize, usize) -> Location,
+                   height: impl Fn() -> usize, width: impl Fn() -> usize) -> bool {
+    let mut lower = y;
+    let mut upper = y + 1;
+    let mut smudge_count = 0;
+    while upper < height() {
+      smudge_count += self.match_rows(lower, upper, &get, &width);
+      if lower == 0 || smudge_count > smudges {
         break;
       }
       lower -= 1;
       upper += 1;
     }
-    smudges
+    smudges == smudge_count
   }
 
-  fn columns_match(&self, x1: usize, x2: usize) -> usize {
-    let mut smudges = 0;
-    for y in 0..self.height {
-      if self.locations[y][x1] != self.locations[y][x2] {
-        smudges += 1;
+  fn locate_reflection(&self, smudges: usize, get: impl Fn(usize, usize) -> Location,
+                       height: impl Fn() -> usize, width: impl Fn() -> usize) -> Option<usize> {
+    for y in 0..height() - 1 {
+      if self.reflection_at(y, smudges, &get, &height, &width) {
+        return Some(y + 1);
       }
     }
-    smudges
-  }
-
-  fn horizonal_reflection_at(&self, at: usize) -> usize {
-    let mut lower = at;
-    let mut upper = at + 1;
-    let mut smudges = 0;
-    while upper < self.width {
-      smudges += self.columns_match(lower, upper);
-      if lower == 0 {
-        break;
-      }
-      lower -= 1;
-      upper += 1;
-    }
-    smudges
+    None
   }
 
   fn find_reflection(&self, smudges: usize) -> usize {
-    for y in 0..self.height - 1 {
-      if self.vertical_reflection_at(y) == smudges {
-        return (y + 1) * 100
-      }
+    if let Some(ans) = self.locate_reflection(smudges,
+                                              |x, y| self.locations[y][x],
+                                               || self.height, || self.width) {
+      return ans * 100
     }
-    for x in 0..self.width - 1 {
-      if self.horizonal_reflection_at(x) == smudges{
-        return x + 1
-      }
+    if let Some(ans) = self.locate_reflection(smudges,
+                                              |x, y| self.locations[x][y],
+                                              || self.width, || self.height) {
+      return ans
     }
     0
   }
