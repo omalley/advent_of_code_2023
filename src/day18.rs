@@ -215,8 +215,7 @@ impl Map {
     for e in &self.edges {
       match e.direction {
         Direction::Up =>
-          // The verticals walls explicitly don't cover the last square, so that
-          // we can count them well.
+          // Don't include the southern end point.
           edges.push(EdgeBox{x: e.start.x..e.start.x+1,
             y: e.end.y..e.start.y, is_vertical: true}),
         Direction::Down =>
