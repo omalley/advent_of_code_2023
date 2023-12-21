@@ -5,6 +5,7 @@ pub enum ModuleKind {
   Broadcast,
   FlipFlop,
   Conjunction,
+  Output,
 }
 
 #[derive(Clone,Debug)]
@@ -15,6 +16,7 @@ pub struct Edge {
 
 #[derive(Clone,Debug)]
 pub struct Module {
+  #[allow(dead_code)]
   name: String,
   kind: ModuleKind,
   outputs: Vec<Option<Edge>>,
@@ -23,7 +25,7 @@ pub struct Module {
 
 impl Module {
   fn from_str(s: &str, names: &HashMap<String,usize>,
-              input_counts: &mut Vec<usize>) -> Result<Self,String> {
+              input_counts: &mut [usize]) -> Result<Self,String> {
     let (full_name, target) = s.split_once(" -> ")
         .ok_or(format!("Can't parse module - {s}"))?;
     let name;
@@ -53,9 +55,12 @@ impl Module {
 pub struct Configuration {
   modules: Vec<Module>,
   broadcaster: usize,
+  rx: usize,
 }
 
 impl Configuration {
+  const FINAL_STATE_NAME: &'static str = "rx";
+
   fn from_str(s: &str) -> Result<Self,String> {
     let mut names = HashMap::new();
     for (i, line) in s.lines().enumerate() {
@@ -67,18 +72,28 @@ impl Configuration {
       }
       names.insert(name, i);
     }
+    let adding_final_state = !names.contains_key(Self::FINAL_STATE_NAME);
+    if adding_final_state {
+      names.insert(Self::FINAL_STATE_NAME.to_string(), names.len());
+    }
     let broadcaster = *names.get("broadcaster").ok_or("Can't find broadcaster")?;
     let mut input_counts = vec![0; names.len()];
-    let mut modules = s.lines().map(|l| Module::from_str(l, &names, &mut input_counts))
+    let mut modules = s.lines()
+        .map(|l| Module::from_str(l, &names, &mut input_counts))
         .collect::<Result<Vec<Module>,String>>()?;
+    if adding_final_state {
+      modules.push(Module{name: Self::FINAL_STATE_NAME.to_string(),
+        kind: ModuleKind::Output, outputs: Vec::new(), input_count: 0})
+    }
     for (i, m) in modules.iter_mut().enumerate() {
       m.input_count = input_counts[i];
     }
-    Ok(Configuration{modules, broadcaster})
+    Ok(Configuration{modules, broadcaster, rx: *names.get(Self::FINAL_STATE_NAME).unwrap()})
   }
 
-  fn push_button(&self, state: &mut [State]) -> [usize; 2]{
+  fn push_button(&self, state: &mut [State]) -> ([usize; 2], [usize; 2]) {
     let mut count = [0; 2];
+    let mut output_count = [0; 2];
     let mut pending: VecDeque<Message> = VecDeque::new();
     count[MessageKind::Low as usize] += 1;
     pending.push_back(Message{kind: MessageKind::Low,
@@ -88,10 +103,8 @@ impl Configuration {
       match module.kind {
         ModuleKind::Broadcast => {
           count[current.kind as usize] += module.outputs.len();
-          for out in &module.outputs {
-            if let Some(edge) = out {
-              pending.push_back(Message{kind: current.kind, via: edge.clone()})
-            }
+          for edge in module.outputs.iter().flatten() {
+            pending.push_back(Message{kind: current.kind, via: edge.clone()})
           }
         }
         ModuleKind::FlipFlop => if current.kind == MessageKind::Low {
@@ -99,10 +112,8 @@ impl Configuration {
             *val = !*val;
             let kind = if *val { MessageKind::High } else { MessageKind::Low };
             count[kind as usize] += module.outputs.len();
-            for out in &module.outputs {
-              if let Some(edge) = out {
-                pending.push_back(Message{kind, via: edge.clone()});
-              }
+            for edge in module.outputs.iter().flatten() {
+              pending.push_back(Message{kind, via: edge.clone()});
             }
           }
         }
@@ -112,16 +123,17 @@ impl Configuration {
             let kind = if prev.iter().all(|k| *k == MessageKind::High)
               { MessageKind::Low } else { MessageKind::High };
             count[kind as usize] += module.outputs.len();
-            for out in &module.outputs {
-              if let Some(edge) = out {
-                pending.push_back(Message{kind, via: edge.clone()});
-              }
+            for edge in module.outputs.iter().flatten() {
+              pending.push_back(Message{kind, via: edge.clone()});
             }
           }
+        },
+        ModuleKind::Output => {
+          output_count[current.kind as usize] += 1;
         }
       }
     }
-    count
+    (count, output_count)
   }
 }
 
@@ -141,6 +153,7 @@ enum State {
   Broadcast,
   FlipFlop(bool),
   Conjunction(Vec<MessageKind>),
+  Output,
 }
 
 impl State {
@@ -149,6 +162,7 @@ impl State {
       ModuleKind::Broadcast => State::Broadcast,
       ModuleKind::FlipFlop => State::FlipFlop(false),
       ModuleKind::Conjunction => State::Conjunction(vec![MessageKind::Low; m.input_count]),
+      ModuleKind::Output => State::Output,
     }).collect()
   }
 }
@@ -161,7 +175,7 @@ pub fn part1(input: &Configuration) -> usize {
   let mut state = State::new(input);
   let mut count = [0; 2];
   for _ in 0..1000 {
-    for (i, c) in input.push_button(&mut state).iter().enumerate() {
+    for (i, c) in input.push_button(&mut state).0.iter().enumerate() {
       count[i] += *c;
     }
   }
