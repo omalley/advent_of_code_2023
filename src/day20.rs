@@ -55,7 +55,6 @@ impl Module {
 pub struct Configuration {
   modules: Vec<Module>,
   broadcaster: usize,
-  rx: usize,
 }
 
 impl Configuration {
@@ -88,7 +87,7 @@ impl Configuration {
     for (i, m) in modules.iter_mut().enumerate() {
       m.input_count = input_counts[i];
     }
-    Ok(Configuration{modules, broadcaster, rx: *names.get(Self::FINAL_STATE_NAME).unwrap()})
+    Ok(Configuration{modules, broadcaster})
   }
 
   fn push_button(&self, state: &mut [State]) -> ([usize; 2], [usize; 2]) {
@@ -182,13 +181,26 @@ pub fn part1(input: &Configuration) -> usize {
   count[0] * count[1]
 }
 
-pub fn part2(_input: &Configuration) -> u64 {
-  0
+pub fn part2(input: &Configuration) -> u64 {
+  for m in &input.modules {
+    println!("{:?}", m);
+  }
+  let mut state = State::new(input);
+  for count in 0..u64::MAX {
+    if count % 100_000 == 0 {
+      println!("count = {count}");
+    }
+    let (_, output) = input.push_button(&mut state);
+    if output == [1, 0] {
+      return count
+    }
+  }
+  panic!("Not found")
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day20::{generator, part1, part2};
+  use crate::day20::{generator, part1};
 
   const INPUT: &str =
 "broadcaster -> a, b, c
