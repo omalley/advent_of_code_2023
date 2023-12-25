@@ -92,7 +92,7 @@ pub fn part1(input: &Map) -> usize {
   input.moves(64)
 }
 
-pub fn part2(input: &Map) -> usize {
+pub fn part2(_input: &Map) -> usize {
   0
 }
 
