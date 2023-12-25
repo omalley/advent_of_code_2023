@@ -1,8 +1,11 @@
-use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet};
+use std::ops;
 use std::ops::Range;
+use num_integer::Integer;
 use smallvec::SmallVec;
 
-#[derive(Clone,Debug,Eq,PartialEq)]
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
 pub enum Spot {
   Garden,
   Rock,
@@ -20,66 +23,408 @@ impl Spot {
   }
 }
 
-type Coordinate = i32;
+type Position = i32;
+type Time = u32;
 
-#[derive(Clone,Debug,Eq,Hash,PartialEq)]
-pub struct Location {
-  x: Coordinate,
-  y: Coordinate,
+#[derive(Clone,Copy,Debug,Eq,Hash,Ord,PartialEq,PartialOrd)]
+pub struct Coordinate {
+  x: Position,
+  y: Position,
+}
+
+impl ops::Add for Coordinate {
+  type Output = Coordinate;
+
+  fn add(self, rhs: Coordinate) -> Self::Output {
+    Coordinate {x: self.x + rhs.x, y: self.y + rhs.y}
+  }
+}
+
+#[derive(Clone,Copy,Debug,Eq,Hash,PartialEq)]
+struct GridCoordinate {
+  x: Position,
+  y: Position,
+}
+
+#[derive(Clone,Debug)]
+struct GridSummary {
+  entry_time: Time,
+  pending: usize,
+  is_active: bool,
+  counts: Vec<usize>,
+  done: [HashSet<Coordinate>; 2],
+}
+
+impl GridSummary {
+  fn init(entry_time: Time) -> Self {
+    GridSummary{ entry_time, pending: 0, is_active: true, counts: Vec::new(),
+      done: [(); 2].map(|_| HashSet::new()) }
+  }
+
+  fn add_count(&mut self, count: usize) {
+    self.counts.push(count)
+  }
+
+  fn count_squares(&self, time: Time) -> usize {
+    if time < self.entry_time {
+      return 0
+    }
+    let time = (time - self.entry_time) as usize;
+    if time < self.counts.len() {
+      self.counts[time]
+    } else if self.counts.len() >= 2 {
+      let len = self.counts.len();
+      self.counts[(len - 2) + ((len % 2) + time) % 2]
+    } else {
+      panic!("Not enough time values!")
+    }
+  }
+
+  fn finish_time(&self) -> Time {
+    self.entry_time + self.counts.len() as Time
+  }
+}
+
+/// How does each the entry time repeat in a direction?
+#[derive(Clone,Debug,Default)]
+struct Repetition {
+  /// The first position where the pattern repeats.
+  start: Position,
+  /// The amount of time between each grid position in this direction.
+  stride: Time,
+}
+
+impl Repetition {
+  fn update(&mut self, position: Position, delta: Time) -> bool {
+    if delta == self.stride {
+      return true
+    }
+    self.start = position;
+    self.stride = delta;
+    false
+  }
+}
+
+#[derive(Clone,Copy,Debug)]
+enum Direction {
+  North,
+  West,
+  South,
+  East,
+}
+
+#[derive(Clone,Debug,Default)]
+struct RepetitionFinder {
+  directions: [Repetition; 4],
+  previous: [Time; 4],
+  done: [bool; 4],
+}
+
+impl RepetitionFinder {
+  fn find_direction(grid: GridCoordinate) -> Option<(Direction,Position)> {
+    match grid.x.cmp(&0) {
+      Ordering::Less => Some((Direction::West, grid.x)),
+      Ordering::Greater => Some((Direction::East, grid.x)),
+      Ordering::Equal => match grid.y.cmp(&0) {
+        Ordering::Less => Some((Direction::North, grid.y)),
+        Ordering::Equal => None,
+        Ordering::Greater => Some((Direction::South, grid.y)),
+      }
+    }
+  }
+
+  fn update(&mut self, grid: GridCoordinate, entry_time: Time) {
+    if let Some((dir, pos)) = Self::find_direction(grid) {
+      let dir = dir as usize;
+      if !self.done[dir] {
+        self.done[dir] = self.directions[dir].update(pos, entry_time - self.previous[dir]);
+        self.previous[dir] = entry_time;
+      }
+    }
+  }
+
+  fn is_done(&self) -> bool {
+    self.done.iter().all(|&x| x)
+  }
+
+  fn is_unique(&self, grid: GridCoordinate) -> bool {
+    (self.directions[0].start..=self.directions[2].start).contains(&grid.y) &&
+        (self.directions[1].start..=self.directions[3].start).contains(&grid.x)
+  }
+
+  fn count_corner(time: Time, stride1: Time, stride2: Time, summary: &GridSummary) -> usize {
+    if stride1 + stride2 >= time {
+      return 0
+    }
+    let mut time = time - stride1 - stride2;
+    // Find a common stride for the two dimensions and consider them a box
+    let stride = stride1.lcm(&stride2);
+    let mut result = 0;
+    // iterate through the diagonals in this corner
+    for length in 1..u32::MAX {
+      // find the number of locations in a box
+      let mut new_size = 0;
+      for x in (0..stride).step_by(stride1 as usize) {
+        for y in (0..stride).step_by(stride2 as usize) {
+          if x + y < time {
+            new_size += summary.count_squares(time - x - y);
+          }
+        }
+      }
+      result += new_size * length as usize;
+      if stride > time || new_size == 0 {
+        break
+      }
+      time -= stride;
+    }
+    result
+  }
+
+  fn count_stripe(time: Time, stride: Time, summaries: &Vec<&GridSummary>) -> usize {
+    // how long until the last grid in the stripe is stable?
+    let max_finish = summaries.iter()
+        .map(|&s| s.finish_time()).max().unwrap();
+    let mut result = 0;
+    let mut time = time;
+    if time > max_finish {
+      let complete_pairs = (time - max_finish) / (2 * stride);
+      for &s in summaries {
+        result += s.count_squares(max_finish);
+        result += s.count_squares(max_finish + stride);
+      }
+      result *= complete_pairs as usize;
+      time -=  complete_pairs * stride * 2;
+    }
+    while time >= stride {
+      time -= stride;
+      let mut new_count = 0;
+      for &s in summaries {
+        new_count += s.count_squares(time);
+      }
+      if new_count == 0 {
+        break;
+      }
+      result += new_count;
+    }
+    result
+  }
+
+  fn count_squares(&self, time: Time, summaries: &HashMap<GridCoordinate, GridSummary>) -> usize {
+    // did we reach the time limit before finding the repetitions?
+    if !self.is_done() {
+      return summaries.values().map(|s| s.count_squares(time)).sum()
+    }
+    // Get the counts for the uniques
+    let mut result: usize = summaries.iter()
+        .filter(|(&grid, _)| self.is_unique(grid))
+        .map(|(_, summary)| summary.count_squares(time)).sum();
+    // West edge
+    result += Self::count_stripe(time, self.directions[1].stride,
+                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                     .map(|y| &summaries[&GridCoordinate{x:self.directions[1].start, y}])
+                                     .collect());
+    // East edge
+    result += Self::count_stripe(time, self.directions[3].stride,
+                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                     .map(|y| &summaries[&GridCoordinate{x:self.directions[3].start, y}])
+                                     .collect());
+    // North edge
+    result += Self::count_stripe(time, self.directions[0].stride,
+                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                     .map(|x| &summaries[&GridCoordinate{x, y:self.directions[0].start}])
+                                     .collect());
+    // South edge
+    result += Self::count_stripe(time, self.directions[2].stride,
+                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                     .map(|x| &summaries[&GridCoordinate{x, y:self.directions[2].start}])
+                                     .collect());
+    // North East corner
+    result += Self::count_corner(time, self.directions[0].stride, self.directions[1].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[1].start,
+                                   y: self.directions[0].start}]);
+    // North West corner
+    result += Self::count_corner(time, self.directions[0].stride, self.directions[3].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[3].start,
+                                   y: self.directions[0].start}]);
+    // South East corner
+    result += Self::count_corner(time, self.directions[2].stride, self.directions[1].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[1].start,
+                                   y: self.directions[2].start}]);
+    // South West corner
+    result += Self::count_corner(time, self.directions[2].stride, self.directions[3].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[3].start,
+                                   y: self.directions[2].start}]);
+    result
+  }
 }
 
 #[derive(Clone,Debug)]
 pub struct Map {
   spots: Vec<Vec<Spot>>,
-  start: Location,
-  width: Range<Coordinate>,
-  height: Range<Coordinate>,
+  start: Coordinate,
+  width: Range<Position>,
+  height: Range<Position>,
 }
 
 impl Map {
   fn from_str(s: &str) -> Result<Self,String> {
-    let mut start : Option<Location> = None;
+    let mut start : Option<Coordinate> = None;
     let spots = s.lines().enumerate()
         .map(|(y, line)| line.chars().enumerate()
             .map(|(x, ch)| {
               let s = Spot::from_char(ch);
               if let Ok(Spot::Start) = s {
-                start = Some(Location{x: x as i32, y: y as i32})
+                start = Some(Coordinate {x: x as i32, y: y as i32})
               }
               s })
             .collect::<Result<Vec<Spot>,String>>())
         .collect::<Result<Vec<Vec<Spot>>,String>>()?;
     let start = start.ok_or("No start".to_string())?;
-    let width = 0..(spots[0].len() as Coordinate);
-    let height = 0..(spots.len() as Coordinate);
+    let width = 0..(spots[0].len() as Position);
+    let height = 0..(spots.len() as Position);
     Ok(Map{spots, start, width, height})
   }
 
-  fn next(&self, spot: &Location) -> SmallVec<[Location;4]> {
+  fn contains(&self, location: Coordinate) -> bool {
+    self.width.contains(&location.x) && self.height.contains(&location.y)
+  }
+
+  fn get_spot(&self, location: Coordinate) -> Spot {
+    self.spots[location.y.rem_euclid(self.height.end) as usize]
+        [location.x.rem_euclid(self.width.end) as usize]
+  }
+
+  fn convert_to_grid(&self, location: Coordinate) -> GridCoordinate {
+    GridCoordinate {x: location.x.div_euclid(self.width.end), y: location.y.div_euclid(self.height.end)}
+  }
+
+  fn next<const LIMITLESS: bool>(&self, spot: Coordinate) -> SmallVec<[Coordinate;4]> {
     let mut result = SmallVec::new();
-    for dir in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-      let new = Location{x: spot.x + dir.0, y: spot.y + dir.1};
-      if self.width.contains(&new.x) && self.height.contains(&new.y) &&
-          self.spots[new.y as usize][new.x as usize] != Spot::Rock {
+    for dir in [Coordinate {x:0, y:-1}, Coordinate {x:-1, y:0},
+                Coordinate {x:0, y:1}, Coordinate {x:1, y:0}] {
+      let new = spot + dir;
+      if (LIMITLESS || self.contains(new)) && self.get_spot(new) != Spot::Rock {
         result.push(new);
       }
     }
     result
   }
 
-  fn moves(&self, dist: usize) -> usize {
-    let mut current : HashSet<Location> = HashSet::new();
-    current.insert(self.start.clone());
-    for _ in 0..dist {
+  fn bounds(done: &HashSet<Coordinate>) -> Option<(Coordinate, Coordinate)> {
+    if done.is_empty() {
+      return None
+    }
+    let first = done.iter().next().unwrap();
+    let mut left = first.x;
+    let mut right = first.x;
+    let mut top = first.y;
+    let mut bottom = first.y;
+    for c in done.iter() {
+      left = left.min(c.x);
+      right = right.max(c.x);
+      top = top.min(c.y);
+      bottom = bottom.max(c.y);
+    }
+    Some((Coordinate{x: left, y: top}, Coordinate{x: right, y: bottom}))
+  }
+
+  fn print(&self, done: &HashSet<Coordinate>) {
+    if let Some((left_top, right_bottom)) = Self::bounds(done) {
+      for y in left_top.y-1..=right_bottom.y+1 {
+        if y.rem_euclid(self.height.end) == 0 {
+          for x in left_top.x-1..=right_bottom.x+1 {
+            if x.rem_euclid(self.width.end) == 0 {
+              print!("+");
+            }
+            print!("-");
+          }
+          println!();
+        }
+        for x in left_top.x-1..=right_bottom.x+1 {
+          if x.rem_euclid(self.width.end) == 0 {
+            print!("|");
+          }
+          let coord = Coordinate{x, y};
+          if done.contains(&coord) {
+            print!("O");
+          } else if self.get_spot(coord) == Spot::Rock {
+            print!("#");
+          } else {
+            print!(".");
+          }
+        }
+        println!();
+      }
+    }
+  }
+
+  fn moves<const LIMITLESS: bool>(&self, dist: Time) -> usize {
+    let mut frontier : HashSet<Coordinate> = HashSet::new();
+    let mut done = [(); 2].map(|_| HashSet::new());
+    frontier.insert(self.start.clone());
+    done[0].insert(self.start.clone());
+    for t in 1..=dist {
       let mut next = HashSet::new();
-      for loc in &current {
-        for n in self.next(loc) {
-          next.insert(n);
+      for loc in frontier.into_iter() {
+        for n in self.next::<LIMITLESS>(loc) {
+          if done[t as usize % 2].insert(n) {
+            next.insert(n);
+          }
         }
       }
-      current = next;
+      frontier = next;
     }
-    current.len()
+    //self.print(&done[(dist as usize) % 2]);
+    //println!();
+    done[(dist as usize) % 2].len()
+  }
+
+  fn unbounded_moves(&self, dist: Time) -> usize {
+    let mut repetitions = RepetitionFinder::default();
+    let mut frontier : HashSet<Coordinate> = HashSet::new();
+    let mut summaries = HashMap::new();
+    frontier.insert(self.start.clone());
+    let mut init_summary = GridSummary::init(0);
+    init_summary.add_count(1);
+    summaries.insert(GridCoordinate {x:0, y:0}, init_summary);
+
+    for t in 1..=dist {
+      let mut next = HashSet::new();
+      for loc in frontier.into_iter() {
+        for n in self.next::<true>(loc) {
+          let grid = self.convert_to_grid(n);
+          // Get the summary for the next grid
+          let summary = summaries.entry(grid)
+              .or_insert_with(|| {
+                // for the cardinal directions, keep track of the stride
+                if grid.x == 0 || grid.y == 0 {
+                  repetitions.update(grid, t);
+                }
+                GridSummary::init(t)});
+          if summary.done[t as usize % 2].insert(n) {
+            next.insert(n);
+            summary.pending += 1;
+          }
+        }
+      }
+      let mut done = repetitions.is_done();
+      // Update all of the summaries for time t + 1
+      for (grid, summary) in summaries.iter_mut() {
+        if summary.is_active || summary.pending > 0 {
+          summary.add_count(summary.done[t as usize % 2].len());
+          summary.is_active = summary.pending > 0;
+          summary.pending = 0;
+          if summary.is_active {
+            done &= !repetitions.is_unique(*grid);
+          }
+        }
+      }
+      if done {
+        break
+      }
+      frontier = next;
+    }
+    repetitions.count_squares(dist, &summaries)
   }
 }
 
@@ -89,16 +434,16 @@ pub fn generator(input: &str) -> Map {
 }
 
 pub fn part1(input: &Map) -> usize {
-  input.moves(64)
+  input.moves::<true>(64)
 }
 
-pub fn part2(_input: &Map) -> usize {
-  0
+pub fn part2(input: &Map) -> usize {
+  input.unbounded_moves(26_501_365)
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day21::{generator, part2};
+  use crate::day21::{generator};
 
   const INPUT: &str =
 "...........
@@ -115,11 +460,23 @@ mod tests {
 
   #[test]
   fn test_part1() {
-    assert_eq!(16, generator(INPUT).moves(6));
+    let input = generator(INPUT);
+    assert_eq!(1, input.moves::<false>(0));
+    assert_eq!(2, input.moves::<false>(1));
+    assert_eq!(4, input.moves::<false>(2));
+    assert_eq!(16, input.moves::<false>(6));
   }
 
   #[test]
   fn test_part2() {
-    assert_eq!(0, part2(&generator(INPUT)));
+    let input = generator(INPUT);
+    assert_eq!(1, input.unbounded_moves(0));
+    assert_eq!(2, input.unbounded_moves(1));
+    assert_eq!(4, input.unbounded_moves(2));
+    assert_eq!(16, input.unbounded_moves(6));
+    assert_eq!(50, input.moves::<true>(10));
+    assert_eq!(50, input.unbounded_moves(10));
+    assert_eq!(668697, input.moves::<true>(1_000));
+    assert_eq!(668697, input.unbounded_moves(1_000));
   }
 }
