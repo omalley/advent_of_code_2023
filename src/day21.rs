@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::ops;
 use std::ops::Range;
 use smallvec::SmallVec;
 
-#[derive(Clone,Debug,Eq,PartialEq)]
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
 pub enum Spot {
   Garden,
   Rock,
@@ -23,10 +24,18 @@ impl Spot {
 type Coordinate = i32;
 type Time = u32;
 
-#[derive(Clone,Debug,Eq,Hash,Ord,PartialEq,PartialOrd)]
+#[derive(Clone,Copy,Debug,Eq,Hash,Ord,PartialEq,PartialOrd)]
 pub struct Location {
   x: Coordinate,
   y: Coordinate,
+}
+
+impl ops::Add for Location {
+  type Output = Location;
+
+  fn add(self, rhs: Location) -> Self::Output {
+    Location{x: self.x + rhs.x, y: self.y + rhs.y}
+  }
 }
 
 #[derive(Clone,Debug)]
@@ -56,13 +65,24 @@ impl Map {
     Ok(Map{spots, start, width, height})
   }
 
+  fn contains(&self, location: Location) -> bool {
+    self.width.contains(&location.x) && self.height.contains(&location.y)
+  }
+
+  fn get_spot(&self, location: Location) -> Spot {
+    self.spots[location.y.rem_euclid(self.height.end) as usize]
+        [location.x.rem_euclid(self.width.end) as usize]
+  }
+
+  fn convert_to_grid(&self, location: Location) -> GridOffset {
+    GridOffset{x: location.x.div_euclid(self.width.end), y: location.y.div_euclid(self.height.end)}
+  }
+
   fn next<const LIMITLESS: bool>(&self, spot: Location) -> SmallVec<[Location;4]> {
     let mut result = SmallVec::new();
-    for dir in [(1, 0), (0, 1), (-1, 0), (0, -1)] {
-      let new = Location{x: spot.x + dir.0, y: spot.y + dir.1};
-      if (LIMITLESS || (self.width.contains(&new.x) && self.height.contains(&new.y))) &&
-          self.spots[new.y.rem_euclid(self.height.end) as usize]
-              [new.x.rem_euclid(self.width.end) as usize] != Spot::Rock {
+    for dir in [Location{x:1, y:0}, Location{x:0, y:1}, Location{x:-1, y:0}, Location{x:0, y:-1}] {
+      let new = spot + dir;
+      if (LIMITLESS || self.contains(new)) && self.get_spot(new) != Spot::Rock{
         result.push(new);
       }
     }
@@ -91,7 +111,7 @@ impl Map {
         if locations.contains(&Location{x, y}) {
           print!("0");
         } else {
-          match self.spots[y.rem_euclid(self.height.end) as usize][x.rem_euclid(self.width.end) as usize] {
+          match self.get_spot(Location{x,y}) {
             Spot::Garden => print!("."),
             Spot::Rock => print!("#"),
             Spot::Start => print!("S"),
@@ -107,48 +127,26 @@ impl Map {
     let mut done = [(); 2].map(|_| HashMap::new());
     let mut first = HashMap::new();
     frontier.insert(self.start.clone());
-    first.insert(GridOffset{x:0, y:0}, 0 as Time);
+    first.insert(GridOffset{x:0, y:0}, GridSummary::init(0));
     for t in 0..dist {
       let mut next = HashSet::new();
       for loc in frontier.into_iter() {
         for n in self.next::<LIMITLESS>(loc) {
           done[t as usize % 2].entry(n.clone()).or_insert_with(|| {
             first.entry(GridOffset{x: n.x / self.width.end, y: n.y / self.height.end})
-                .or_insert_with(|| t);
+                .or_insert_with(|| GridSummary::init(t));
             next.insert(n);
           });
         }
       }
       frontier = next;
     }
-    let mut y_grid = 0..1 as Coordinate;
-    let mut x_grid = 0..1 as Coordinate;
-    for g in first.keys() {
-      if !y_grid.contains(&g.y) {
-        y_grid.start = y_grid.start.min(g.y);
-        y_grid.end = y_grid.end.max(g.y + 1);
-      }
-      if !x_grid.contains(&g.x) {
-        x_grid.start = x_grid.start.min(g.x);
-        x_grid.end = x_grid.end.max(g.x + 1);
-      }
-    }
-    for y in y_grid.clone() {
-      for x in x_grid.clone() {
-        if let Some(t) = first.get(&GridOffset{x, y}) {
-          print!(" {t:>4}");
-        } else {
-          print!("    .");
-        }
-      }
-      println!();
-    }
     //self.print_map(&done[(dist + 1) % 2]);
     done[(dist as usize + 1) % 2].len()
   }
 }
 
-#[derive(Clone,Debug,Eq,Hash,PartialEq)]
+#[derive(Clone,Copy,Debug,Eq,Hash,PartialEq)]
 struct GridOffset {
   x: Coordinate,
   y: Coordinate,
@@ -161,6 +159,10 @@ struct GridSummary {
 }
 
 impl GridSummary {
+  fn init(time: Time) -> Self {
+    GridSummary{ time, counts: Vec::new() }
+  }
+
   fn count_squares(&self, time: usize) -> usize {
     if time < self.counts.len() {
       self.counts[time]
