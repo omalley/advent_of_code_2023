@@ -2,6 +2,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::ops;
 use std::ops::Range;
+use num_integer::Integer;
 use smallvec::SmallVec;
 
 #[derive(Clone,Copy,Debug,Eq,PartialEq)]
@@ -78,6 +79,10 @@ impl GridSummary {
       panic!("Not enough time values!")
     }
   }
+
+  fn finish_time(&self) -> Time {
+    self.entry_time + self.counts.len() as Time
+  }
 }
 
 /// How does each the entry time repeat in a direction?
@@ -100,6 +105,7 @@ impl Repetition {
   }
 }
 
+#[derive(Clone,Copy,Debug)]
 enum Direction {
   North,
   West,
@@ -144,6 +150,91 @@ impl RepetitionFinder {
   fn is_unique(&self, grid: GridCoordinate) -> bool {
     (self.directions[0].start..=self.directions[2].start).contains(&grid.y) &&
         (self.directions[1].start..=self.directions[3].start).contains(&grid.x)
+  }
+
+  fn count_corner(time: Time, stride1: Time, stride2: Time, summary: &GridSummary) -> usize {
+    println!("count_corner: time: {time} strides: {stride1}, {stride2} summary: {}", summary.entry_time);
+    // Find a common stride for the two dimensions (and even out the tik/tok)
+    let stride = stride1.lcm(&stride2).lcm(&2);
+
+    0
+  }
+
+  fn count_stripe(time: Time, stride: Time, summaries: &Vec<&GridSummary>) -> usize {
+    println!("count_stripe: time: {time} stride: {stride} summaries: {:?}",
+             summaries.iter().map(|&s| s.entry_time).collect::<Vec<Time>>());
+    let max_finish = summaries.iter()
+        .map(|&s| s.finish_time()).max().unwrap();
+    let complete_pairs = (time - max_finish) / (2 * stride);
+    let mut result = 0;
+    for &s in summaries {
+      result += s.count_squares(time - stride);
+      result += s.count_squares(time - 2 * stride);
+    }
+    println!("{complete_pairs} pairs of {result}");
+    result *= complete_pairs as usize;
+    let mut time = time - complete_pairs * stride * 2;
+    while time >= stride {
+      time -= stride;
+      let mut new_count = 0;
+      for &s in summaries {
+        new_count += s.count_squares(time);
+      }
+      if new_count == 0 {
+        break;
+      }
+      println!("Adding another partial column with {new_count}");
+      result += new_count;
+    }
+    result
+  }
+
+  fn count_squares(&self, time: Time, summaries: &HashMap<GridCoordinate, GridSummary>) -> usize {
+    // did we reach the time limit before finding the repetitions?
+    if !self.is_done() {
+      return summaries.values().map(|s| s.count_squares(time)).sum()
+    }
+    // Get the counts for the uniques
+    let mut result: usize = summaries.iter()
+        .filter(|(&grid, _)| self.is_unique(grid))
+        .map(|(_, summary)| summary.count_squares(time)).sum();
+    // West edge
+    result += Self::count_stripe(time, self.directions[1].stride,
+                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                     .map(|y| &summaries[&GridCoordinate{x:self.directions[1].start, y}])
+                                     .collect());
+    // East edge
+    result += Self::count_stripe(time, self.directions[3].stride,
+                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                     .map(|y| &summaries[&GridCoordinate{x:self.directions[3].start, y}])
+                                     .collect());
+    // North edge
+    result += Self::count_stripe(time, self.directions[0].stride,
+                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                     .map(|x| &summaries[&GridCoordinate{x, y:self.directions[0].start}])
+                                     .collect());
+    // South edge
+    result += Self::count_stripe(time, self.directions[2].stride,
+                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                     .map(|x| &summaries[&GridCoordinate{x, y:self.directions[2].start}])
+                                     .collect());
+    // North East corner
+    result += Self::count_corner(time, self.directions[0].stride, self.directions[1].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[1].start,
+                                   y: self.directions[0].start}]);
+    // North West corner
+    result += Self::count_corner(time, self.directions[0].stride, self.directions[3].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[3].start,
+                                   y: self.directions[0].start}]);
+    // South East corner
+    result += Self::count_corner(time, self.directions[2].stride, self.directions[1].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[1].start,
+                                   y: self.directions[2].start}]);
+    // South West corner
+    result += Self::count_corner(time, self.directions[2].stride, self.directions[3].stride,
+                                 &summaries[&GridCoordinate{x: self.directions[3].start,
+                                   y: self.directions[2].start}]);
+    result
   }
 }
 
@@ -258,8 +349,7 @@ impl Map {
       }
       frontier = next;
     }
-    println!("Repetitions: {:?}", repetitions);
-    0
+    repetitions.count_squares(dist, &summaries)
   }
 }
 
@@ -272,9 +362,8 @@ pub fn part1(input: &Map) -> usize {
   input.moves::<true>(64)
 }
 
-pub fn part2(_input: &Map) -> usize {
-  //input.move(26501365)
-  0
+pub fn part2(input: &Map) -> usize {
+  input.unbounded_moves(26_501_365)
 }
 
 #[cfg(test)]
@@ -303,9 +392,9 @@ mod tests {
   #[test]
   fn test_part2() {
     let input = generator(INPUT);
-    assert_eq!(668697, input.unbounded_moves(1000));
     //assert_eq!(50, input.moves::<true>(10));
-    //assert_eq!(50, input.grid_move(10));
-    //assert_eq!(668697, input.grid_move(1000));
+    //assert_eq!(50, input.unbounded_moves(10));
+    assert_eq!(668697, input.moves::<true>(1_000));
+    assert_eq!(668697, input.unbounded_moves(1_000));
   }
 }
