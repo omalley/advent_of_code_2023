@@ -191,7 +191,7 @@ pub fn part2(input: &Configuration) -> u64 {
       println!("count = {count}");
     }
     let (_, output) = input.push_button(&mut state);
-    if output == [1, 0] {
+    if output[MessageKind::Low as usize] == 1 {
       return count
     }
   }
