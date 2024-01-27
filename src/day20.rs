@@ -1,10 +1,13 @@
 use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::io::prelude::*;
 
-#[derive(Clone,Copy,Debug)]
+#[derive(Clone,Copy,Debug,Eq,PartialEq)]
 pub enum ModuleKind {
   Broadcast,
   FlipFlop,
   Conjunction,
+  Inverter,
   Output,
 }
 
@@ -49,6 +52,15 @@ impl Module {
           Edge{target: u, input_num: in_cnt}})).collect();
     Ok(Module{name: name.to_string(), kind, outputs, input_count: 0})
   }
+
+  fn print(&self, level: usize) {
+    println!("{:level$}{} ({:?}):", "", self.name, self.kind);
+  }
+
+  fn sends_to(&self, target: usize) -> bool {
+    self.outputs.iter().any(|e|
+        e.as_ref().map_or(false, |edge| edge.target == target))
+  }
 }
 
 #[derive(Clone,Debug)]
@@ -86,53 +98,79 @@ impl Configuration {
     }
     for (i, m) in modules.iter_mut().enumerate() {
       m.input_count = input_counts[i];
+      // Conjunctions with a single input are just inverters
+      if m.kind == ModuleKind::Conjunction && m.input_count == 1 {
+        m.kind = ModuleKind::Inverter;
+      }
     }
     Ok(Configuration{modules, broadcaster})
   }
 
-  fn push_button(&self, state: &mut [State]) -> ([usize; 2], [usize; 2]) {
-    let mut count = [0; 2];
-    let mut output_count = [0; 2];
-    let mut pending: VecDeque<Message> = VecDeque::new();
-    count[MessageKind::Low as usize] += 1;
-    pending.push_back(Message{kind: MessageKind::Low,
-      via: Edge{target: self.broadcaster, input_num: 0}});
-    while let Some(current) = pending.pop_front() {
-      let module = &self.modules[current.via.target];
+  fn write_dot(&self, filename: &str) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    writeln!(&mut file, "digraph {{")?;
+    writeln!(&mut file, "  button [shape = invtriangle, rank = source]")?;
+    writeln!(&mut file, "  button -> broadcaster")?;
+    for module in &self.modules {
       match module.kind {
         ModuleKind::Broadcast => {
-          count[current.kind as usize] += module.outputs.len();
-          for edge in module.outputs.iter().flatten() {
-            pending.push_back(Message{kind: current.kind, via: edge.clone()})
-          }
+          writeln!(&mut file, "  {} [shape = box]", module.name)?;
         }
-        ModuleKind::FlipFlop => if current.kind == MessageKind::Low {
-          if let State::FlipFlop(val) = &mut state[current.via.target] {
-            *val = !*val;
-            let kind = if *val { MessageKind::High } else { MessageKind::Low };
-            count[kind as usize] += module.outputs.len();
-            for edge in module.outputs.iter().flatten() {
-              pending.push_back(Message{kind, via: edge.clone()});
-            }
-          }
+        ModuleKind::FlipFlop => {
+          writeln!(&mut file, "  {} [shape = parallelogram]", module.name)?;
         }
         ModuleKind::Conjunction => {
-          if let State::Conjunction(prev) = &mut state[current.via.target] {
-            prev[current.via.input_num] = current.kind;
-            let kind = if prev.iter().all(|k| *k == MessageKind::High)
-              { MessageKind::Low } else { MessageKind::High };
-            count[kind as usize] += module.outputs.len();
-            for edge in module.outputs.iter().flatten() {
-              pending.push_back(Message{kind, via: edge.clone()});
-            }
-          }
-        },
+          writeln!(&mut file, "  {} [shape = ellipse]", module.name)?;
+        }
+        ModuleKind::Inverter => {
+          writeln!(&mut file, "  {} [shape = circle]", module.name)?;
+        }
         ModuleKind::Output => {
-          output_count[current.kind as usize] += 1;
+          writeln!(&mut file, "  subgraph {{ rank = sink ; {} [shape = triangle] }}", module.name)?;
+        }
+      }
+      for edge in module.outputs.iter() {
+        match edge {
+          None => writeln!(&mut file, "  {} -> unknown", module.name)?,
+          Some(e) => writeln!(&mut file, "  {} -> {}", module.name, self.modules[e.target].name)?,
         }
       }
     }
-    (count, output_count)
+    writeln!(&mut file, "}}")?;
+    Ok(())
+  }
+
+  fn find_inputs(&self, target: usize) -> Vec<usize> {
+    self.modules.iter().enumerate()
+        .filter_map(|(i, m)| if m.sends_to(target) { Some(i) } else { None })
+        .collect()
+  }
+
+  fn find_output_modules(&self) -> Vec<usize> {
+    self.modules.iter().enumerate()
+        .filter(|(_, m)| m.kind == ModuleKind::Output)
+        .map(|(i, _)| i)
+        .collect()
+  }
+
+  fn print_node_backtrace(&self, level: usize, stack: &mut Vec<usize>) {
+    let current = *stack.last().unwrap();
+    for child in self.find_inputs(current) {
+      self.modules[child].print(2 * level);
+      if !stack.contains(&child) {
+        stack.push(child);
+        self.print_node_backtrace(level + 1, stack);
+        stack.pop();
+      }
+    }
+  }
+
+  fn print_backtrace(&self) {
+    for output in self.find_output_modules() {
+      self.modules[output].print(0);
+      let mut stack = vec!{output};
+      self.print_node_backtrace(1, &mut stack);
+    }
   }
 }
 
@@ -142,6 +180,15 @@ enum MessageKind {
   High,
 }
 
+impl MessageKind {
+  fn invert(&self) -> Self {
+    match self {
+      MessageKind::Low => MessageKind::High,
+      MessageKind::High => MessageKind::Low,
+    }
+  }
+}
+
 #[derive(Clone,Debug)]
 struct Message {
   kind: MessageKind,
@@ -149,20 +196,95 @@ struct Message {
 }
 
 enum State {
-  Broadcast,
+  Empty,
   FlipFlop(bool),
   Conjunction(Vec<MessageKind>),
-  Output,
 }
 
 impl State {
-  fn new(conf: &Configuration) -> Vec<Self> {
-    conf.modules.iter().map(|m| match m.kind {
-      ModuleKind::Broadcast => State::Broadcast,
+  fn new(module: &Module) -> Self {
+    match module.kind {
+      ModuleKind::Broadcast | ModuleKind::Inverter | ModuleKind::Output => State::Empty,
       ModuleKind::FlipFlop => State::FlipFlop(false),
-      ModuleKind::Conjunction => State::Conjunction(vec![MessageKind::Low; m.input_count]),
-      ModuleKind::Output => State::Output,
-    }).collect()
+      ModuleKind::Conjunction => State::Conjunction(vec![MessageKind::Low; module.input_count]),
+    }
+  }
+}
+
+struct FlowState<'a> {
+  broadcaster: usize,
+  modules: &'a [Module],
+  states: Vec<State>,
+  message_counts: [usize; 2],
+  outputs: usize,
+  pending: VecDeque<Message>,
+}
+
+impl<'a> FlowState<'a> {
+  fn new(conf: &'a Configuration) -> Self {
+    let broadcaster = conf.broadcaster;
+    let modules = &conf.modules;
+    let states = conf.modules.iter().map(|m| State::new(m)).collect();
+    FlowState{broadcaster, modules, states, message_counts: [0; 2], outputs: 0,
+      pending: VecDeque::new()}
+  }
+
+  fn send(&mut self, message: Message) {
+    self.message_counts[message.kind as usize] += 1;
+    self.pending.push_back(message);
+  }
+
+  fn part1_score(&self) -> usize {
+    self.message_counts[0] * self.message_counts[1]
+  }
+
+  fn push_button(&mut self) {
+    let via = Edge{target: self.broadcaster, input_num: 0};
+    self.send(Message{kind: MessageKind::Low, via});
+    self.stabilize();
+  }
+
+  fn stabilize(&mut self) {
+    while let Some(message) = self.pending.pop_front() {
+      let module = &self.modules[message.via.target];
+      match module.kind {
+        ModuleKind::Broadcast => {
+          for edge in module.outputs.iter().flatten() {
+            self.send(Message { kind: message.kind, via: edge.clone() })
+          }
+        }
+        ModuleKind::FlipFlop => if message.kind == MessageKind::Low {
+          if let State::FlipFlop(val) = &mut self.states[message.via.target] {
+            *val = !*val;
+            let kind = if *val { MessageKind::High } else { MessageKind::Low };
+            for edge in module.outputs.iter().flatten() {
+              self.send(Message { kind, via: edge.clone() });
+            }
+          }
+        }
+        ModuleKind::Conjunction => {
+          if let State::Conjunction(prev) = &mut self.states[message.via.target] {
+            prev[message.via.input_num] = message.kind;
+            let kind = if prev.iter().all(|k| *k == MessageKind::High)
+            { MessageKind::Low } else { MessageKind::High };
+            for edge in module.outputs.iter().flatten() {
+              self.send(Message { kind, via: edge.clone() });
+            }
+          }
+        },
+        ModuleKind::Inverter => {
+          let kind = message.kind.invert();
+          for edge in module.outputs.iter().flatten() {
+            self.send(Message { kind, via: edge.clone() })
+          }
+        }
+        ModuleKind::Output => {
+          if message.kind == MessageKind::Low {
+            self.outputs += 1;
+          }
+        }
+      }
+    }
   }
 }
 
@@ -171,36 +293,21 @@ pub fn generator(input: &str) -> Configuration {
 }
 
 pub fn part1(input: &Configuration) -> usize {
-  let mut state = State::new(input);
-  let mut count = [0; 2];
+  let mut state = FlowState::new(input);
   for _ in 0..1000 {
-    for (i, c) in input.push_button(&mut state).0.iter().enumerate() {
-      count[i] += *c;
-    }
+    state.push_button();
   }
-  count[0] * count[1]
+  state.part1_score()
 }
 
 pub fn part2(input: &Configuration) -> u64 {
-  for m in &input.modules {
-    println!("{:?}", m);
-  }
-  let mut state = State::new(input);
-  for count in 0..u64::MAX {
-    if count % 100_000 == 0 {
-      println!("count = {count}");
-    }
-    let (_, output) = input.push_button(&mut state);
-    if output[MessageKind::Low as usize] == 1 {
-      return count
-    }
-  }
-  panic!("Not found")
+  //input.write_dot("day20.dot").unwrap();
+  0
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day20::{generator, part1};
+  use crate::day20::{generator, part1, part2};
 
   const INPUT: &str =
 "broadcaster -> a, b, c
@@ -214,7 +321,7 @@ mod tests {
 %a -> inv, con
 &inv -> b
 %b -> con
-&con -> output";
+&con -> rx";
 
   #[test]
   fn test_part1() {
@@ -224,6 +331,7 @@ mod tests {
 
   #[test]
   fn test_part2() {
+    part2(&generator(INPUT2));
     //assert_eq!(0, part2(&generator(INPUT)));
   }
 }
