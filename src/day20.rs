@@ -1,6 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::fs::File;
 use std::io::prelude::*;
+use smallvec::SmallVec;
 
 #[derive(Clone,Copy,Debug,Eq,PartialEq)]
 pub enum ModuleKind {
@@ -174,6 +175,41 @@ impl Configuration {
   }
 }
 
+trait Graph {
+  fn start(&self) -> usize;
+  fn next(&self, node: usize) -> &[Option<Edge>];
+  fn is_exit(&self, node: usize) -> bool;
+  fn num_nodes(&self) -> usize;
+  fn get_kind(&self, node: usize) -> ModuleKind;
+  fn get_input_count(&self, node: usize) -> usize;
+}
+
+impl Graph for Configuration {
+  fn start(&self) -> usize {
+    self.broadcaster
+  }
+
+  fn next(&self, node: usize) -> &[Option<Edge>] {
+    &self.modules[node].outputs
+  }
+
+  fn is_exit(&self, node: usize) -> bool {
+    self.modules[node].kind == ModuleKind::Output
+  }
+
+  fn num_nodes(&self) -> usize {
+    self.modules.len()
+  }
+
+  fn get_kind(&self, node: usize) -> ModuleKind {
+    self.modules[node].kind
+  }
+
+  fn get_input_count(&self, node: usize) -> usize {
+    self.modules[node].input_count
+  }
+}
+
 #[derive(Clone,Copy,Debug,Eq,PartialEq)]
 enum MessageKind {
   Low,
@@ -202,18 +238,17 @@ enum State {
 }
 
 impl State {
-  fn new(module: &Module) -> Self {
-    match module.kind {
+  fn new(kind: ModuleKind, input_count: usize) -> Self {
+    match kind {
       ModuleKind::Broadcast | ModuleKind::Inverter | ModuleKind::Output => State::Empty,
       ModuleKind::FlipFlop => State::FlipFlop(false),
-      ModuleKind::Conjunction => State::Conjunction(vec![MessageKind::Low; module.input_count]),
+      ModuleKind::Conjunction => State::Conjunction(vec![MessageKind::Low; input_count]),
     }
   }
 }
 
 struct FlowState<'a> {
-  broadcaster: usize,
-  modules: &'a [Module],
+  graph: &'a dyn Graph,
   states: Vec<State>,
   message_counts: [usize; 2],
   outputs: usize,
@@ -221,61 +256,65 @@ struct FlowState<'a> {
 }
 
 impl<'a> FlowState<'a> {
-  fn new(conf: &'a Configuration) -> Self {
-    let broadcaster = conf.broadcaster;
-    let modules = &conf.modules;
-    let states = conf.modules.iter().map(|m| State::new(m)).collect();
-    FlowState{broadcaster, modules, states, message_counts: [0; 2], outputs: 0,
+  fn new(graph: &'a dyn Graph) -> Self {
+    let states = (0..graph.num_nodes())
+        .map(|id| State::new(graph.get_kind(id), graph.get_input_count(id)))
+        .collect();
+    FlowState{graph, states, message_counts: [0; 2], outputs: 0,
       pending: VecDeque::new()}
   }
 
-  fn send(&mut self, message: Message) {
-    self.message_counts[message.kind as usize] += 1;
-    self.pending.push_back(message);
+  fn send(&mut self, kind: MessageKind, edge: &Option<Edge>) {
+    self.message_counts[kind as usize] += 1;
+    if let Some(e) = edge {
+      self.pending.push_back(Message{kind, via: e.clone()});
+    }
   }
 
   fn part1_score(&self) -> usize {
-    self.message_counts[0] * self.message_counts[1]
+    self.message_counts.iter().product()
   }
 
   fn push_button(&mut self) {
-    let via = Edge{target: self.broadcaster, input_num: 0};
-    self.send(Message{kind: MessageKind::Low, via});
+    let via = Edge{target: self.graph.start(), input_num: 0};
+    self.send(MessageKind::Low, &Some(via));
     self.stabilize();
   }
 
   fn stabilize(&mut self) {
     while let Some(message) = self.pending.pop_front() {
-      let module = &self.modules[message.via.target];
-      match module.kind {
+      let current = message.via.target;
+      match self.graph.get_kind(current) {
         ModuleKind::Broadcast => {
-          for edge in module.outputs.iter().flatten() {
-            self.send(Message { kind: message.kind, via: edge.clone() })
+          for edge in self.graph.next(current) {
+            self.send(message.kind, edge);
           }
         }
         ModuleKind::FlipFlop => if message.kind == MessageKind::Low {
-          if let State::FlipFlop(val) = &mut self.states[message.via.target] {
+          if let State::FlipFlop(val) = &mut self.states[current] {
             *val = !*val;
             let kind = if *val { MessageKind::High } else { MessageKind::Low };
-            for edge in module.outputs.iter().flatten() {
-              self.send(Message { kind, via: edge.clone() });
+            for edge in self.graph.next(current) {
+              self.send(kind, edge);
             }
           }
         }
         ModuleKind::Conjunction => {
-          if let State::Conjunction(prev) = &mut self.states[message.via.target] {
+          if let State::Conjunction(prev) =
+              &mut self.states[message.via.target] {
             prev[message.via.input_num] = message.kind;
-            let kind = if prev.iter().all(|k| *k == MessageKind::High)
-            { MessageKind::Low } else { MessageKind::High };
-            for edge in module.outputs.iter().flatten() {
-              self.send(Message { kind, via: edge.clone() });
+            let kind =
+                if prev.iter().all(|k| *k == MessageKind::High)
+                    { MessageKind::Low } else { MessageKind::High };
+            for edge in self.graph.next(current) {
+              self.send(kind, edge);
             }
           }
         },
         ModuleKind::Inverter => {
           let kind = message.kind.invert();
-          for edge in module.outputs.iter().flatten() {
-            self.send(Message { kind, via: edge.clone() })
+          for edge in self.graph.next(current) {
+            self.send(kind, edge);
           }
         }
         ModuleKind::Output => {
@@ -285,6 +324,123 @@ impl<'a> FlowState<'a> {
         }
       }
     }
+  }
+}
+
+type NodeList = SmallVec<[usize; 10]>;
+#[derive(Clone,Debug)]
+struct ForwardDominators {
+  doms: Vec<Option<NodeList>>,
+}
+
+impl ForwardDominators {
+  /// Compute the forward dominators, which are the nodes that must be
+  /// visited before the exit, for each node in the graph. Each list is
+  /// sorted backwards, so the first element is the exit node of the
+  /// graph and the last is the immediate dominator.
+  ///
+  fn compute(graph: &Configuration) -> Self {
+    let mut doms: Vec<Option<NodeList>> = vec![None; graph.modules.len()];
+    let mut pending = graph.find_output_modules();
+    for out in &pending {
+      doms[*out] = Some(SmallVec::new());
+    }
+    while let Some(current) = pending.pop() {
+      let mut state = doms[current].as_ref().unwrap().clone();
+      state.push(current);
+      for prev in graph.find_inputs(current) {
+        if let Some(prev_state) = &mut doms[prev] {
+          if Self::intersect(prev_state, &state) {
+            pending.push(prev);
+          }
+        } else {
+          doms[prev] = Some(state.clone());
+          pending.push(prev);
+        }
+      }
+    }
+    ForwardDominators{doms}
+  }
+
+  /// Truncate the left node list so that it only contains the nodes
+  /// from the right list.
+  /// Returns true if the left list changed.
+  fn intersect(left: &mut NodeList, right: &NodeList) -> bool {
+    for i in 0..left.len().min(right.len()) {
+      if left[i] != right[i] {
+        left.drain(i..left.len());
+        return true;
+      }
+    }
+    false
+  }
+
+  fn compute_partitions<'a>(&self, graph: &'a Configuration) -> Option<Vec<Subgraph<'a>>> {
+    if let [output] = graph.find_output_modules() {
+
+    }
+    None
+  }
+}
+
+struct Subgraph<'a> {
+  graph: &'a Configuration,
+  exit: usize,
+  /// Indexed by module number in the graph, contains id number in subgraph.
+  translation: Vec<usize>,
+  edges: Vec<Vec<Option<Edge>>>,
+}
+
+impl<'a> Subgraph<'a> {
+  fn init(graph: &'a Configuration, start: usize, exit: usize, is_included: &[bool]) -> Self {
+    let mut translation = Vec::new();
+    let mut backwards = vec![None; graph.modules.len()];
+    // build the translation for the subgraph
+    let mut pending = vec![start];
+    while let Some(current) = pending.pop() {
+      backwards[current] = Some(translation.len());
+      translation.push(current);
+      for edge in graph.modules[current].outputs.iter().flatten() {
+        if is_included[edge.target] && backwards[edge.target].is_none() {
+          pending.push(edge.target);
+        }
+      }
+    }
+    let mut edges = vec![Vec::new(); translation.len()];
+    for (new, old) in translation.iter().enumerate() {
+      let next_list = edges.get_mut(new).unwrap();
+      next_list.extend(graph.modules[*old].outputs.iter()
+          .map(|x|
+              x.as_ref()
+               .map(|e| Edge{target: backwards[e.target].unwrap(),
+                input_num: e.input_num})))
+    }
+    Subgraph{graph, exit, translation, edges}
+  }
+}
+impl<'a> Graph for Subgraph<'a> {
+  fn start(&self) -> usize {
+    0
+  }
+
+  fn next(&self, node: usize) -> &[Option<Edge>] {
+    &self.edges[node]
+  }
+
+  fn is_exit(&self, node: usize) -> bool {
+    node == self.exit
+  }
+
+  fn num_nodes(&self) -> usize {
+    self.translation.len()
+  }
+
+  fn get_kind(&self, node: usize) -> ModuleKind {
+    self.graph.modules[self.translation[node]].kind
+  }
+
+  fn get_input_count(&self, node: usize) -> usize {
+    self.graph.modules[self.translation[node]].input_count
   }
 }
 
@@ -301,7 +457,13 @@ pub fn part1(input: &Configuration) -> usize {
 }
 
 pub fn part2(input: &Configuration) -> u64 {
-  //input.write_dot("day20.dot").unwrap();
+  input.write_dot("day20.dot").unwrap();
+  let doms = ForwardDominators::compute(input);
+  for (i, (m, d)) in input.modules.iter()
+      .zip(doms.doms.iter()).enumerate() {
+    println!("mod {i} {:?}", m);
+    println!("{:?}", d);
+  }
   0
 }
 
