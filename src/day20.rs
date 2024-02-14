@@ -376,7 +376,7 @@ impl ForwardDominators {
   }
 
   fn compute_partitions<'a>(&self, graph: &'a Configuration) -> Option<Vec<Subgraph<'a>>> {
-    if let [output] = graph.find_output_modules() {
+    if let [output] = &graph.find_output_modules()[..] {
 
     }
     None
