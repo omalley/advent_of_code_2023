@@ -12,7 +12,7 @@ pub enum ModuleKind {
   Output,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Eq,Hash,PartialEq)]
 pub struct Edge {
   target: usize,
   input_num: usize,
@@ -210,7 +210,7 @@ impl Graph for Configuration {
   }
 }
 
-#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+#[derive(Clone,Copy,Debug,Eq,Hash,PartialEq)]
 enum MessageKind {
   Low,
   High,
@@ -225,12 +225,13 @@ impl MessageKind {
   }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone,Debug,Eq,Hash,PartialEq)]
 struct Message {
   kind: MessageKind,
   via: Edge,
 }
 
+#[derive(Clone,Debug,Eq,Hash,PartialEq)]
 enum State {
   Empty,
   FlipFlop(bool),
@@ -377,7 +378,9 @@ impl ForwardDominators {
 
   fn compute_partitions<'a>(&self, graph: &'a Configuration) -> Option<Vec<Subgraph<'a>>> {
     if let [output] = &graph.find_output_modules()[..] {
-
+      if let [conditional] = &graph.find_inputs(*output)[..] {
+        let forward_doms = ForwardDominators::compute(graph);
+      }
     }
     None
   }
@@ -388,6 +391,7 @@ struct Subgraph<'a> {
   exit: usize,
   /// Indexed by module number in the graph, contains id number in subgraph.
   translation: Vec<usize>,
+  /// Indexed by subgraph node id, leaving edges
   edges: Vec<Vec<Option<Edge>>>,
 }
 
@@ -398,13 +402,21 @@ impl<'a> Subgraph<'a> {
     // build the translation for the subgraph
     let mut pending = vec![start];
     while let Some(current) = pending.pop() {
-      backwards[current] = Some(translation.len());
-      translation.push(current);
-      for edge in graph.modules[current].outputs.iter().flatten() {
-        if is_included[edge.target] && backwards[edge.target].is_none() {
-          pending.push(edge.target);
+      if backwards[current].is_none() {
+        backwards[current] = Some(translation.len());
+        translation.push(current);
+        for edge in graph.modules[current].outputs.iter().flatten() {
+          if is_included[edge.target] {
+            pending.push(edge.target);
+          }
         }
       }
+    }
+    // Map the exit into its subgraph id.
+    let exit = backwards[exit].unwrap();
+    // Map the exit node to point to the graph's output node.
+    if let Some(output) = graph.find_output_modules().get(0) {
+      translation[exit] = *output;
     }
     let mut edges = vec![Vec::new(); translation.len()];
     for (new, old) in translation.iter().enumerate() {
@@ -418,6 +430,7 @@ impl<'a> Subgraph<'a> {
     Subgraph{graph, exit, translation, edges}
   }
 }
+
 impl<'a> Graph for Subgraph<'a> {
   fn start(&self) -> usize {
     0
