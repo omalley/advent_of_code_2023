@@ -292,18 +292,24 @@ impl<'a> FlowState<'a> {
     self.message_counts.iter().product()
   }
 
-  fn push_button(&mut self) {
+  fn push_button(&mut self, trace: bool) {
     let via = Edge{target: self.graph.start(), input_num: 0};
     self.send(MessageKind::Low, &Some(via));
-    self.stabilize();
+    self.stabilize(trace);
   }
 
-  fn stabilize(&mut self) {
+  fn stabilize(&mut self, trace: bool) {
+    let mut count: usize = 0;
     while let Some(message) = self.pending.pop_front() {
       let current = message.via.target;
-      //println!("  {:?} to {current} {} ({:?})", message.kind,
-      //         self.graph.get_name(current),
-      //         self.graph.get_kind(current));
+      if trace {
+        count += 1;
+        println!("  {} {:?} to {current} {} ({:?})",
+                 count,
+                 message.kind,
+                 self.graph.get_name(current),
+                 self.graph.get_kind(current));
+      }
       match self.graph.get_kind(current) {
         ModuleKind::Broadcast => {
           for edge in self.graph.next(current) {
@@ -401,8 +407,8 @@ impl<'a> Subgraph<'a> {
     let start;
     loop {
       state.outputs[MessageKind::High as usize] = 0;
-      //println!("Pushing button {}",  time + 1);
-      state.push_button();
+      let prev_state = state.states.clone();
+      state.push_button(false);
       time += 1;
       if let Some(prev) = states.get(&state.states) {
         start = *prev;
@@ -410,7 +416,7 @@ impl<'a> Subgraph<'a> {
       }
       states.insert(state.states.clone(), time);
       if state.outputs[MessageKind::High as usize] > 0 {
-        outputs.push(time);
+        outputs.push(OutputMatch {time, prev_state});
       }
     }
     CycleTracker{outputs, start, length: time - start}
@@ -495,9 +501,17 @@ impl Recurrence {
 }
 
 #[derive(Clone,Debug)]
+/// When did we find a possible output and what was the state of the subgraph before
+/// the button push?
+struct OutputMatch {
+  time: usize,
+  prev_state: Vec<State>,
+}
+
+#[derive(Clone,Debug)]
 struct CycleTracker {
-  // The times when we got lows
-  outputs: Vec<usize>,
+  // The messages that match our output criteria
+  outputs: Vec<OutputMatch>,
   // The start of the first cycle
   start: usize,
   // the length of the cycle
@@ -505,15 +519,50 @@ struct CycleTracker {
 }
 
 impl CycleTracker {
-  fn solve(cycles: &[CycleTracker]) -> Option<usize> {
+
+  /// Build the combined state from the subgraphs and execute push the button once to
+  /// test if it generates a low message.
+  fn test_next_step(subgraphs: &[Subgraph], matches: &[(&Vec<State>, Recurrence)]) -> bool {
+    if subgraphs.is_empty() || subgraphs.len() != matches.len() {
+      return false
+    }
+    // Build the combined state from the discovered solution.
+    let mut state = FlowState::new(subgraphs.first().unwrap().graph);
+    let mut filled_in = vec![false; state.states.len()];
+    for (sub, states) in subgraphs.iter().zip(matches.iter()
+        .map(|m| m.0)) {
+      for (new, orig) in sub.translation.iter().enumerate() {
+        if !filled_in[*orig] {
+          filled_in[*orig] = true;
+          state.states[*orig] = states[new].clone();
+        }
+      }
+    }
+    state.push_button(false);
+    state.outputs[MessageKind::Low as usize] > 0
+  }
+
+  /// Take the subgraphs and the matches and make sure they work together.
+  fn solve_one(subgraphs: &[Subgraph], matches: &[(&Vec<State>, Recurrence)]) -> Option<usize> {
+    if Self::test_next_step(subgraphs, matches) {
+      return Some(Recurrence::solve(&matches.iter()
+          .map(|m| m.1).collect::<Vec<Recurrence>>()))
+    }
+    None
+  }
+
+  fn solve(parts: &[Subgraph], cycles: &[CycleTracker]) -> Option<usize> {
+    // I don't think it is possible to generate an input with a cycle other than at the start.
     if cycles.iter().any(|c| c.start != 1) {
       return None;
     }
-    Some(cycles.iter().map(|cycle| cycle.outputs.iter()
-        .map(|t| Recurrence{cycle: cycle.length, remainder: *t % cycle.length}))
+    // Generate all combinations of the cycles and find the best.
+    cycles.iter().map(|cycle| cycle.outputs.iter()
+        .map(|om| (&om.prev_state, Recurrence{cycle: cycle.length,
+              remainder: om.time % cycle.length})))
         .multi_cartesian_product()
-        .map(|cp| Recurrence::solve(&cp))
-        .min().unwrap())
+        .filter_map(|cp | Self::solve_one(parts, &cp))
+        .min()
   }
 }
 
@@ -524,7 +573,7 @@ pub fn generator(input: &str) -> Configuration {
 pub fn part1(input: &Configuration) -> usize {
   let mut state = FlowState::new(input);
   for _ in 0..1000 {
-    state.push_button();
+    state.push_button(false);
   }
   state.part1_score()
 }
@@ -533,7 +582,7 @@ fn brute_force_part2(input: &Configuration) -> usize {
   let mut state = FlowState::new(input);
   let mut time = 0;
   while state.outputs[MessageKind::Low as usize] == 0 {
-    state.push_button();
+    state.push_button(false);
     time += 1;
   }
   time
@@ -541,7 +590,7 @@ fn brute_force_part2(input: &Configuration) -> usize {
 
 pub fn part2(input: &Configuration) -> usize {
   if let Some(parts) = input.compute_partitions() {
-    if let Some(answer) = CycleTracker::solve(&parts.iter()
+    if let Some(answer) = CycleTracker::solve(&parts, &parts.iter()
         .map(|p| p.find_cycle()).collect::<Vec<CycleTracker>>()) {
       return answer;
     }
