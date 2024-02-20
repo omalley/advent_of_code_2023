@@ -1,6 +1,6 @@
 use colored::Colorize;
 use std::cmp::min;
-use std::{fmt, fs, io};
+use std::{fmt, fs};
 use std::path::Path;
 use std::time;
 
@@ -44,14 +44,18 @@ pub fn time<T>(func: &dyn Fn() -> T) -> (time::Duration, T) {
 }
 
 /// Read the data files from the in_dir into a vector of string.
-pub fn read_inputs(in_dir: &str, days: &[&str]) -> io::Result<Vec<String>> {
-  let data: Vec<io::Result<String>> = days.iter()
-    .map(|&day| {
-      let filename = format!("{in_dir}/{day}.txt");
-      fs::read_to_string(Path::new(&filename))
-    })
-    .collect();
-  data.into_iter().collect()
+pub fn read_inputs(in_dir: &str, days: &[&str], picked: &[bool]) -> Result<Vec<String>, String> {
+  days.iter().zip(picked.iter())
+    .map(|(&day, picked)| {
+      if *picked {
+        let filename = format!("{in_dir}/{day}.txt");
+        fs::read_to_string(Path::new(&filename))
+            .map_err(|e| format!("Error reading {filename}: {}", e))
+      } else {
+        Ok(String::new())
+      }
+
+    }).collect::<Result<Vec<String>, String>>()
 }
 
 /// The times and results of running a day's code.

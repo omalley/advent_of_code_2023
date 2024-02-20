@@ -1,4 +1,5 @@
-use omalley_aoc2023::{FUNCS,NAMES,utils};
+use std::time;
+use omalley_aoc2023::{FUNCS, NAMES, utils};
 
 use argh::FromArgs;
 use colored::Colorize;
@@ -14,9 +15,9 @@ struct Args {
   #[argh(option, short='i', default="String::from(\"input\")")]
   input: String,
 
-  /// a single day to execute (defaults to all)
+  /// days to execute (defaults to all)
   #[argh(positional)]
-  day: Option<usize>,
+  days: Vec<usize>,
 }
 
 #[derive(Default,Deserialize,Serialize)]
@@ -63,34 +64,36 @@ impl Answers {
 }
 
 fn main() {
-    let args: Args = argh::from_env();
-    // Did the user pick a single day to run
-    let day_filter: Option<usize> = match args.day {
-        Some(day) => {
-            let name = format!("day{}", day);
-            Some(NAMES.iter().position(|x| **x == name)
-              .expect("Requested an unimplemented day"))
-        },
-        None => None
-    };
-    // Read the inputs from the given directory
-    println!("{} {}\n", "Reading from".bold(), &args.input);
-    let inputs = utils::read_inputs(&args.input, NAMES)
-      .expect("Can't read input dir");
-
-    let (elapsed, results) = utils::time(&|| {
-        FUNCS.iter().enumerate()
-          .filter(|(p, _)| day_filter.is_none() || day_filter.unwrap() == *p)
-          .map(|(p, f)| f(&inputs[p]))
-          .collect::<Vec<utils::DayResult>>()
-    });
-
-    for r in &results {
-      println!("{}", r);
+  let args: Args = argh::from_env();
+  // Which days did the user pick to run?
+  let mut day_filter = [args.days.is_empty(); NAMES.len()];
+  for day in args.days {
+    let name = format!("day{day}");
+    if let Some(idx) = NAMES.iter().position(|&n| n == name) {
+      day_filter[idx] = true;
+    } else {
+      panic!("Can't find implementation for {name}.")
     }
-    println!("{} {}", "Overall runtime".bold(), format!("({:.2?})", elapsed).dimmed());
+  }
+  // Read the inputs from the given directory
+  println!("{} {}\n", "Reading from".bold(), &args.input);
+  let inputs = utils::read_inputs(&args.input, NAMES, &day_filter)
+      .expect("Can't read input");
 
-    let mut old_answers = Answers::read(&args.input);
-    old_answers.update(&results);
-    old_answers.write(&args.input);
+  let results=
+    FUNCS.iter().enumerate()
+        .filter(|(p, _)| day_filter[*p])
+        .map(|(p, f)| {
+          let result = f(&inputs[p]);
+          println!("{result}");
+          result})
+        .collect::<Vec<utils::DayResult>>();
+  let elapsed = results.iter()
+      .map(|r| r.generate_time + r.part1.0 + r.part2.0)
+      .sum::<time::Duration>();
+  println!("{} {}", "Overall runtime".bold(), format!("({:.2?})", elapsed).dimmed());
+
+  let mut old_answers = Answers::read(&args.input);
+  old_answers.update(&results);
+  old_answers.write(&args.input);
 }
