@@ -163,17 +163,21 @@ impl RepetitionFinder {
   fn count_stripe(time: Time, stride: Time, summaries: &Vec<&GridSummary>) -> usize {
     println!("count_stripe: time: {time} stride: {stride} summaries: {:?}",
              summaries.iter().map(|&s| s.entry_time).collect::<Vec<Time>>());
+    // how long until the last grid in the stripe is stable?
     let max_finish = summaries.iter()
         .map(|&s| s.finish_time()).max().unwrap();
-    let complete_pairs = (time - max_finish) / (2 * stride);
     let mut result = 0;
-    for &s in summaries {
-      result += s.count_squares(time - stride);
-      result += s.count_squares(time - 2 * stride);
+    let mut time = time;
+    if time > max_finish {
+      let complete_pairs = (time - max_finish) / (2 * stride);
+      for &s in summaries {
+        result += s.count_squares(max_finish);
+        result += s.count_squares(max_finish + stride);
+      }
+      println!("{complete_pairs} pairs of {result}");
+      result *= complete_pairs as usize;
+      time -=  complete_pairs * stride * 2;
     }
-    println!("{complete_pairs} pairs of {result}");
-    result *= complete_pairs as usize;
-    let mut time = time - complete_pairs * stride * 2;
     while time >= stride {
       time -= stride;
       let mut new_count = 0;
