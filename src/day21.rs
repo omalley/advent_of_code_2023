@@ -154,10 +154,31 @@ impl RepetitionFinder {
 
   fn count_corner(time: Time, stride1: Time, stride2: Time, summary: &GridSummary) -> usize {
     println!("count_corner: time: {time} strides: {stride1}, {stride2} summary: {}", summary.entry_time);
-    // Find a common stride for the two dimensions (and even out the tik/tok)
-    let stride = stride1.lcm(&stride2).lcm(&2);
-
-    0
+    if stride1 + stride2 >= time {
+      return 0
+    }
+    let mut time = time - stride1 - stride2;
+    // Find a common stride for the two dimensions and consider them a box
+    let stride = stride1.lcm(&stride2);
+    let mut result = 0;
+    // iterate through the diagonals in this corner
+    for length in 1..u32::MAX {
+      // find the number of locations in a box
+      let mut new_size = 0;
+      for x in (0..stride).step_by(stride1 as usize) {
+        for y in (0..stride).step_by(stride2 as usize) {
+          if x + y < time {
+            new_size += summary.count_squares(time - x - y);
+          }
+        }
+      }
+      result += new_size * length as usize;
+      if stride > time || new_size == 0 {
+        break
+      }
+      time -= stride;
+    }
+    result
   }
 
   fn count_stripe(time: Time, stride: Time, summaries: &Vec<&GridSummary>) -> usize {
@@ -287,11 +308,59 @@ impl Map {
     for dir in [Coordinate {x:0, y:-1}, Coordinate {x:-1, y:0},
                 Coordinate {x:0, y:1}, Coordinate {x:1, y:0}] {
       let new = spot + dir;
-      if (LIMITLESS || self.contains(new)) && self.get_spot(new) != Spot::Rock{
+      if (LIMITLESS || self.contains(new)) && self.get_spot(new) != Spot::Rock {
         result.push(new);
       }
     }
     result
+  }
+
+  fn bounds(done: &HashSet<Coordinate>) -> Option<(Coordinate, Coordinate)> {
+    if done.is_empty() {
+      return None
+    }
+    let first = done.iter().next().unwrap();
+    let mut left = first.x;
+    let mut right = first.x;
+    let mut top = first.y;
+    let mut bottom = first.y;
+    for c in done.iter() {
+      left = left.min(c.x);
+      right = right.max(c.x);
+      top = top.min(c.y);
+      bottom = bottom.max(c.y);
+    }
+    Some((Coordinate{x: left, y: top}, Coordinate{x: right, y: bottom}))
+  }
+
+  fn print(&self, done: &HashSet<Coordinate>) {
+    if let Some((left_top, right_bottom)) = Self::bounds(done) {
+      for y in left_top.y-1..=right_bottom.y {
+        if y.rem_euclid(self.height.end) == 0 {
+          for x in left_top.x-1..=right_bottom.x {
+            if x.rem_euclid(self.width.end) == 0 {
+              print!("+");
+            }
+            print!("-");
+          }
+          println!();
+        }
+        for x in left_top.x-1..=right_bottom.x {
+          if x.rem_euclid(self.width.end) == 0 {
+            print!("|");
+          }
+          let coord = Coordinate{x, y};
+          if done.contains(&coord) {
+            print!("O");
+          } else if self.get_spot(coord) == Spot::Rock {
+            print!("#");
+          } else {
+            print!(".");
+          }
+        }
+        println!();
+      }
+    }
   }
 
   fn moves<const LIMITLESS: bool>(&self, dist: Time) -> usize {
@@ -309,6 +378,7 @@ impl Map {
       }
       frontier = next;
     }
+    self.print(&done[(dist as usize + 1) % 2]);
     done[(dist as usize + 1) % 2].len()
   }
 
@@ -326,6 +396,7 @@ impl Map {
           // Get the summary for the next grid
           let summary = summaries.entry(grid)
               .or_insert_with(|| {
+                // for the cardinal directions, keep track of the stride
                 if grid.x == 0 || grid.y == 0 {
                   repetitions.update(grid, t);
                 }
@@ -396,8 +467,8 @@ mod tests {
   #[test]
   fn test_part2() {
     let input = generator(INPUT);
-    //assert_eq!(50, input.moves::<true>(10));
-    //assert_eq!(50, input.unbounded_moves(10));
+    assert_eq!(50, input.moves::<true>(10));
+    assert_eq!(50, input.unbounded_moves(10));
     assert_eq!(668697, input.moves::<true>(1_000));
     assert_eq!(668697, input.unbounded_moves(1_000));
   }
