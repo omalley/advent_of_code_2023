@@ -1,6 +1,6 @@
 use std::cmp;
 use std::cmp::Ordering;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use array2d::Array2D;
 
@@ -94,7 +94,7 @@ impl Surface {
     Surface{x_range, y_range, surface}
   }
 
-  fn update(&mut self, blk_id: usize, blk: &Block) -> Option<usize> {
+  fn update(&mut self, blk_id: usize, blk: &Block) -> Vec<usize> {
     let mut height = 0;
     for x in blk.x.clone() {
       for y in blk.y.clone() {
@@ -103,18 +103,16 @@ impl Surface {
         height = height.max(cell.height);
       }
     }
-    let mut support = None;
-    let mut multiple_supports = false;
+    let mut support = Vec::new();
     for x in blk.x.clone() {
       for y in blk.y.clone() {
         let cell = self.surface.get_mut((x - self.x_range.start) as usize,
                                     (y - self.y_range.start) as usize).unwrap();
-        if !multiple_supports && height == cell.height && cell.block.is_some() {
-          if support.is_none() {
-            support = cell.block;
-          } else if support != cell.block {
-            multiple_supports = true;
-            support = None;
+        if height == cell.height {
+          if let Some(dep) = cell.block {
+            if !support.contains(&dep) {
+              support.push(dep);
+            }
           }
         }
         cell.height = height + blk.z.len();
@@ -132,20 +130,49 @@ pub fn part1(input: &[Block]) -> usize {
   let mut surface = Surface::init(input);
   let mut required = HashSet::new();
   for (blk_id, blk) in input.iter().enumerate() {
-    if let Some(req) = surface.update(blk_id, blk) {
+    if let [req] = surface.update(blk_id, blk)[..] {
       required.insert(req);
     }
   }
   input.len() - required.len()
 }
 
-pub fn part2(_input: &[Block]) -> usize {
-  0
+pub fn part2(input: &[Block]) -> usize {
+  if input.is_empty() {
+    return 0
+  }
+  let mut surface = Surface::init(input);
+  let mut supported_by: HashMap<usize, HashSet<usize>> = HashMap::new();
+  for (blk_id, blk) in input.iter().enumerate() {
+    let supports = surface.update(blk_id, blk);
+    let mut transitive;
+    match supports.len() {
+      0 => {
+        transitive = HashSet::new();
+      }
+      1 => {
+        // add our support to its set of transitive supporters
+        let support = supports.first().unwrap();
+        transitive = supported_by.get(support).unwrap().clone();
+        transitive.insert(*support);
+      }
+      _ => {
+        // compute the intersection of all of the blocks that support us
+        let first = supports.first().unwrap();
+        transitive = supported_by.get(first).unwrap().clone();
+        let others: Vec<&HashSet<usize>> =
+            supports[1..].iter().map(|b| supported_by.get(b).unwrap()).collect();
+        transitive.retain(|b| others.iter().all(|&s| s.contains(b)));
+      }
+    }
+    supported_by.insert(blk_id, transitive);
+  }
+  supported_by.values().map(|l| l.len()).sum()
 }
 
 #[cfg(test)]
 mod tests {
-  use crate::day22::{generator,part1};
+  use crate::day22::{generator,part1,part2};
 
   const INPUT: &str =
 "1,0,1~1,2,1
@@ -164,6 +191,7 @@ mod tests {
 
   #[test]
   fn test_part2() {
-    //
+    let input = generator(INPUT);
+    assert_eq!(7, part2(&input));
   }
 }
