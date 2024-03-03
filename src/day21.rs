@@ -328,7 +328,7 @@ impl Map {
     Some((Coordinate{x: left, y: top}, Coordinate{x: right, y: bottom}))
   }
 
-  fn print(&self, done: &HashSet<Coordinate>) {
+  pub fn print(&self, done: &HashSet<Coordinate>) {
     if let Some((left_top, right_bottom)) = Self::bounds(done) {
       for y in left_top.y-1..=right_bottom.y+1 {
         if y.rem_euclid(self.height.end) == 0 {

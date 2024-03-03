@@ -11,6 +11,7 @@ description = "Owen's Solutions to AoC 2023"
 
 [dependencies]
 argh = "0.1"
+array2d = "0.3"
 chrono = "0.4"
 colored = "2"
 itertools = "0.12"
