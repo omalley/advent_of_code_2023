@@ -220,22 +220,22 @@ impl RepetitionFinder {
         .map(|(_, summary)| summary.count_squares(time)).sum();
     // West edge
     result += Self::count_stripe(time, self.directions[1].stride,
-                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                 &(self.directions[0].start..=self.directions[2].start)
                                      .map(|y| &summaries[&GridCoordinate{x:self.directions[1].start, y}])
                                      .collect());
     // East edge
     result += Self::count_stripe(time, self.directions[3].stride,
-                                 &(self.directions[0].start..=self.directions[2].start).into_iter()
+                                 &(self.directions[0].start..=self.directions[2].start)
                                      .map(|y| &summaries[&GridCoordinate{x:self.directions[3].start, y}])
                                      .collect());
     // North edge
     result += Self::count_stripe(time, self.directions[0].stride,
-                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                 &(self.directions[1].start..=self.directions[3].start)
                                      .map(|x| &summaries[&GridCoordinate{x, y:self.directions[0].start}])
                                      .collect());
     // South edge
     result += Self::count_stripe(time, self.directions[2].stride,
-                                 &(self.directions[1].start..=self.directions[3].start).into_iter()
+                                 &(self.directions[1].start..=self.directions[3].start)
                                      .map(|x| &summaries[&GridCoordinate{x, y:self.directions[2].start}])
                                      .collect());
     // North East corner
@@ -361,8 +361,8 @@ impl Map {
   fn moves<const LIMITLESS: bool>(&self, dist: Time) -> usize {
     let mut frontier : HashSet<Coordinate> = HashSet::new();
     let mut done = [(); 2].map(|_| HashSet::new());
-    frontier.insert(self.start.clone());
-    done[0].insert(self.start.clone());
+    frontier.insert(self.start);
+    done[0].insert(self.start);
     for t in 1..=dist {
       let mut next = HashSet::new();
       for loc in frontier.into_iter() {
@@ -383,7 +383,7 @@ impl Map {
     let mut repetitions = RepetitionFinder::default();
     let mut frontier : HashSet<Coordinate> = HashSet::new();
     let mut summaries = HashMap::new();
-    frontier.insert(self.start.clone());
+    frontier.insert(self.start);
     let mut init_summary = GridSummary::init(0);
     init_summary.add_count(1);
     summaries.insert(GridCoordinate {x:0, y:0}, init_summary);

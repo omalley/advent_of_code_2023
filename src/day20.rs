@@ -189,7 +189,6 @@ impl Configuration {
 trait Graph {
   fn start(&self) -> usize;
   fn next(&self, node: usize) -> &[Option<Edge>];
-  fn is_exit(&self, node: usize) -> bool;
   fn num_nodes(&self) -> usize;
   fn get_name(&self, node: usize) -> &str;
   fn get_kind(&self, node: usize) -> ModuleKind;
@@ -203,10 +202,6 @@ impl Graph for Configuration {
 
   fn next(&self, node: usize) -> &[Option<Edge>] {
     &self.modules[node].outputs
-  }
-
-  fn is_exit(&self, node: usize) -> bool {
-    self.modules[node].kind == ModuleKind::Output
   }
 
   fn num_nodes(&self) -> usize {
@@ -354,7 +349,6 @@ impl<'a> FlowState<'a> {
 #[derive(Debug)]
 struct Subgraph<'a> {
   graph: &'a Configuration,
-  exit: usize,
   /// Indexed by module number in the graph, contains id number in subgraph.
   translation: Vec<usize>,
   /// Indexed by subgraph node id, leaving edges
@@ -387,16 +381,15 @@ impl<'a> Subgraph<'a> {
                         .map(|target| Edge{target, ..*e})))
                 .collect())
         .collect::<Vec<Vec<Option<Edge>>>>();
-    let mut output = exit;
     // Add the output node to the subgraph and connect the exit node
     // to it.
     if let Some(out) = graph.find_output_modules().first() {
-      output = translation.len();
+      let output = translation.len();
       translation.push(*out);
       edges[backwards[exit].unwrap()] = vec![Some(Edge{target: output, input_num: 0})];
       edges.push(vec![]);
     }
-    Subgraph{graph, exit: output, translation, edges}
+    Subgraph{graph, translation, edges}
   }
 
   fn find_cycle(&self) -> CycleTracker {
@@ -430,10 +423,6 @@ impl<'a> Graph for Subgraph<'a> {
 
   fn next(&self, node: usize) -> &[Option<Edge>] {
     &self.edges[node]
-  }
-
-  fn is_exit(&self, node: usize) -> bool {
-    node == self.exit
   }
 
   fn num_nodes(&self) -> usize {
