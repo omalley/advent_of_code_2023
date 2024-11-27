@@ -1,4 +1,6 @@
 use std::fmt::{Debug, Display, Formatter};
+use std::fs::File;
+use std::io::prelude::*;
 use smallvec::SmallVec;
 use strum_macros::EnumIter;
 use strum::IntoEnumIterator;
@@ -42,7 +44,7 @@ impl FloorType {
     })
   }
 
-  fn to_char(&self) -> char {
+  fn to_char(self) -> char {
     match self {
       FloorType::Space => '.',
       FloorType::Forrest => '#',
@@ -153,10 +155,10 @@ impl Map {
   }
 
   /// Find the neighbors that we can move to from the given coordinate.
-  fn neighbors(&self, spot: &Coordinate) -> NeighborList {
+  fn neighbors<const SLIPPERY:bool>(&self, spot: &Coordinate) -> NeighborList {
     let mut result = SmallVec::new();
-    match self.spot(spot) {
-      FloorType::Space => {
+    match (self.spot(spot), SLIPPERY) {
+      (FloorType::Space, _) | (FloorType::Slope(_), false) => {
         for heading in Direction::iter() {
           if let Some(next) = self.move_to(spot, heading) {
             if self.spot(&next) != FloorType::Forrest {
@@ -165,7 +167,7 @@ impl Map {
           }
         }
       }
-      FloorType::Slope(heading) => {
+      (FloorType::Slope(heading), true) => {
         let coordinate= self.move_to(spot, heading).unwrap();
         result.push(DirectedCoordinate{coordinate, heading});
       }
@@ -176,10 +178,10 @@ impl Map {
 
   /// Assuming we aren't at a junction, what is the next location? At dead ends will
   /// return None.
-  fn follow(&self, spot: &DirectedCoordinate) -> Option<DirectedCoordinate> {
+  fn follow<const SLIPPERY: bool>(&self, spot: &DirectedCoordinate) -> Option<DirectedCoordinate> {
     let backwards = spot.heading.opposite();
-    match self.spot(&spot.coordinate) {
-      FloorType::Space => {
+    match (self.spot(&spot.coordinate), SLIPPERY) {
+      (FloorType::Space,_) | (FloorType::Slope(_), false) => {
         for heading in Direction::iter() {
           if heading != backwards {
             if let Some(next) = self.move_to(&spot.coordinate, heading) {
@@ -190,7 +192,7 @@ impl Map {
           }
         }
       }
-      FloorType::Slope(heading) if heading != backwards => {
+      (FloorType::Slope(heading), true) if heading != backwards => {
         if let Some(coordinate) = self.move_to(&spot.coordinate, heading) {
           return Some(DirectedCoordinate{coordinate, heading});
         }
@@ -212,7 +214,7 @@ struct JunctionMap<'a> {
 }
 
 impl<'a> JunctionMap<'a> {
-  fn from(map: &'a Map) -> Self {
+  fn from<const SLIPPERY: bool>(map: &'a Map) -> Self {
     let mut result = JunctionMap{
       map,
       locations: vec![vec![None; map.bounds.x as usize];
@@ -267,14 +269,15 @@ struct SummaryEdge {
 impl SummaryEdge {
   /// Starting with the given spot, find where the path leads.
   /// It either leads to a junction or dead ends.
-  fn from(junctions: &JunctionMap, spot: &DirectedCoordinate) -> Option<Self> {
+  fn from<const SLIPPERY: bool>(junctions: &JunctionMap,
+                                spot: &DirectedCoordinate) -> Option<Self> {
     let mut distance = 1;
     let mut current = *spot;
     loop {
       if let Some(destination) = junctions.get(current.coordinate) {
         return Some(SummaryEdge{destination, distance});
       }
-      if let Some(next) = junctions.map.follow(&current) {
+      if let Some(next) = junctions.map.follow::<SLIPPERY>(&current) {
         current = next;
       } else {
         return None
@@ -291,9 +294,10 @@ struct SummaryNode {
 }
 
 impl SummaryNode {
-  fn from(junctions: &JunctionMap, coordinate: &Coordinate) -> Self {
-    let outgoing = junctions.map.neighbors(coordinate).iter()
-        .filter_map(|c| SummaryEdge::from(junctions, c)).collect();
+  fn from<const SLIPPERY: bool>(junctions: &JunctionMap,
+                                coordinate: &Coordinate) -> Self {
+    let outgoing = junctions.map.neighbors::<SLIPPERY>(coordinate).iter()
+        .filter_map(|c| SummaryEdge::from::<SLIPPERY>(junctions, c)).collect();
     SummaryNode{coordinate: *coordinate, outgoing}
   }
 }
@@ -304,25 +308,45 @@ struct SummaryGraph {
 }
 
 impl SummaryGraph {
-  fn from(map: &Map) -> Self {
-    let junctions = JunctionMap::from(map);
+  fn from<const SLIPPERY: bool>(map: &Map) -> Self {
+    let junctions = JunctionMap::from::<SLIPPERY>(map);
     let nodes = junctions.junctions.iter()
-        .map(|junction| SummaryNode::from(&junctions, junction)).collect();
+        .map(|junction| SummaryNode::from::<SLIPPERY>(&junctions, junction)).collect();
     SummaryGraph{nodes}
   }
 
-  fn max(&self, start: NodeId, distance: usize, used: &mut [bool]) -> usize {
-    //println!("visiting {start} at {distance}");
-    let mut result = distance;
-    used[start as usize] = true;
-    for edge in &self.nodes[start as usize].outgoing {
-      if !used[edge.destination as usize] {
-        result = result.max(self.max(edge.destination, distance + edge.distance, used));
+  fn max(&self, start: NodeId, distance: usize, used: &mut [bool], _depth: usize) -> usize {
+    //let padding = depth * 2;
+    //println!("{:padding$}enter {start} at {distance}", "");
+    if start as usize == self.nodes.len() - 1 {
+      distance
+    } else {
+      let mut result = 0;
+      used[start as usize] = true;
+      for edge in &self.nodes[start as usize].outgoing {
+        if !used[edge.destination as usize] {
+          result = result.max(self.max(edge.destination, distance + edge.distance, used,
+                                       _depth + 1));
+        }
+      }
+      used[start as usize] = false;
+      //println!("{:padding$}result = {result}", "");
+      result
+    }
+  }
+
+  #[allow(dead_code)]
+  fn write_dot(&self, filename: &str) -> std::io::Result<()> {
+    let mut file = File::create(filename)?;
+    writeln!(&mut file, "digraph {{")?;
+    for (id, node) in self.nodes.iter().enumerate() {
+      writeln!(&mut file, "node{id} [label = \"{},{}\"]", node.coordinate.x, node.coordinate.y)?;
+      for edge in &node.outgoing {
+        writeln!(&mut file, "node{id} -> node{} [label = \"{}\"]", edge.destination, edge.distance)?;
       }
     }
-    used[start as usize] = false;
-    //println!("result = {result}");
-    result
+    writeln!(&mut file, "}}")?;
+    Ok(())
   }
 }
 
@@ -332,13 +356,15 @@ pub fn generator(input: &str) -> Map {
 }
 
 pub fn part1(input: &Map) -> usize {
-  let graph = SummaryGraph::from(input);
-  //println!("graph: {:?}", graph);
-  graph.max(0, 0, &mut vec![false; graph.nodes.len()])
+  let graph = SummaryGraph::from::<true>(input);
+  //graph.write_dot("part1.dot").expect("problem writing file");
+  graph.max(0, 0, &mut vec![false; graph.nodes.len()], 0)
 }
 
-pub fn part2(_input: &Map) -> usize {
-  0
+pub fn part2(input: &Map) -> usize {
+  let graph = SummaryGraph::from::<false>(input);
+  //graph.write_dot("part2.dot").expect("problem writing file");
+  graph.max(0, 0, &mut vec![false; graph.nodes.len()], 0)
 }
 
 #[cfg(test)]
@@ -379,6 +405,6 @@ mod tests {
   #[test]
   fn test_part2() {
     let input = generator(INPUT);
-    assert_eq!(7, part2(&input));
+    assert_eq!(154, part2(&input));
   }
 }
